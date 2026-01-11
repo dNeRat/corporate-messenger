@@ -3,24 +3,35 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { Request } from 'express';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+  private readonly authService: AuthService,
+  private readonly prisma: PrismaService,
+) {}
 
   @Post('register')
   register(@Body() dto: RegisterDto) {
-    return this.auth.register(dto);
+    return this.authService.register(dto);
   }
 
-  @Post('login')
-  login(@Body() dto: LoginDto) {
-    return this.auth.login(dto);
-  }
+
+@Post('login')
+login(@Body() dto: LoginDto) {
+  return this.authService.login(dto);
+}
 
   @UseGuards(JwtAuthGuard)
-  @Get('me')
-  me(@Req() req: any) {
-    return req.user; // { sub, email }
-  }
+@Get('me')
+async me(@Req() req: Request & { user: any }) {
+  const userId = req.user.sub;
+
+  return this.prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, createdAt: true, profile: true },
+  });
+}
 }
