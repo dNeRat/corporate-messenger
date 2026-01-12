@@ -7,14 +7,21 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  USER
+  ADMIN
+}
+
 model User {
   id           Int      @id @default(autoincrement())
   email        String   @unique
   passwordHash String
+  role         Role     @default(USER)
   createdAt    DateTime @default(now())
 
   profile      Profile?
 }
+
 
 model Profile {
   id        Int    @id @default(autoincrement())
@@ -27,3 +34,6 @@ model Profile {
   userId Int   @unique
   user   User  @relation(fields: [userId], references: [id])
 }
+
+
+

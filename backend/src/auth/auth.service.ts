@@ -4,17 +4,21 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { Role } from '@prisma/client';
+
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
-  ) {}
+  ) { }
 
-  private signToken(userId: number, email: string) {
-    return this.jwt.sign({ sub: userId, email });
+  private signToken(userId: number, email: string, role: Role) {
+    return this.jwt.sign({ sub: userId, email, role });
   }
+
+
 
   async register(dto: RegisterDto) {
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
@@ -36,27 +40,26 @@ export class AuthService {
           },
         },
       },
-      select: { id: true, email: true, profile: true },
+      select: { id: true, email: true, role: true, createdAt: true, profile: true },
     });
 
-    const accessToken = this.signToken(user.id, user.email);
-    return { user, accessToken };
+    return { user, accessToken: this.signToken(user.id, user.email, user.role), }
   }
 
-async login(dto: LoginDto) {
-  const user = await this.prisma.user.findUnique({
-    where: { email: dto.email },
-    select: { id: true, email: true, passwordHash: true, createdAt: true, profile: true },
-  });
+  async login(dto: LoginDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+      select: { id: true, email: true, role: true, passwordHash: true, createdAt: true, profile: true },
+    });
 
-  if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (!user) throw new UnauthorizedException('Invalid credentials');
 
-  const ok = await bcrypt.compare(dto.password, user.passwordHash);
-  if (!ok) throw new UnauthorizedException('Invalid credentials');
+    const ok = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!ok) throw new UnauthorizedException('Invalid credentials');
 
-  const accessToken = this.signToken(user.id, user.email);
+    const accessToken = this.signToken(user.id, user.email, user.role);
 
-  const { passwordHash, ...safeUser } = user;
-  return { user: safeUser, accessToken };
-}
+    const { passwordHash, ...safeUser } = user;
+    return { user: safeUser, accessToken };
+  }
 }
