@@ -68,30 +68,21 @@ export class ChatsService {
 
   async listMyChats(currentUserId: number) {
     return this.prisma.chat.findMany({
-      where: {
-        members: { some: { userId: currentUserId } },
-      },
+  where: { members: { some: { userId: currentUserId } } },
+  orderBy: { updatedAt: 'desc' },
+  select: {
+    id: true, title: true, isGroup: true, createdAt: true, updatedAt: true,
+    members: { select: { userId: true, role: true, user: { select: { id: true, email: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } } } },
+    messages: {
       orderBy: { createdAt: 'desc' },
+      take: 1,
       select: {
-        id: true,
-        title: true,
-        isGroup: true,
-        createdAt: true,
-        members: {
-          select: {
-            userId: true,
-            role: true,
-            user: {
-              select: {
-                id: true,
-                email: true,
-                profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
-              },
-            },
-          },
-        },
+        id: true, text: true, createdAt: true,
+        author: { select: { id: true, profile: { select: { firstName: true, lastName: true } } } },
       },
-    });
+    },
+  },
+});
   }
 
   async getChatById(currentUserId: number, chatId: number) {
