@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UseGuards, Res } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
+import type { Response } from 'express';
 
 @Controller('auth')
 export class AuthController {
@@ -14,14 +15,36 @@ export class AuthController {
 ) {}
 
   @Post('register')
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
-  }
+async register(
+  @Body() dto: RegisterDto,
+  @Res({ passthrough: true }) res: Response,
+) {
+  const { accessToken, user } = await this.authService.register(dto);
+
+  res.cookie('access_token', accessToken, {
+    httpOnly: true,
+    secure: false, // true только на https
+    sameSite: 'lax',
+  });
+
+  return { user };
+}
 
 
 @Post('login')
-login(@Body() dto: LoginDto) {
-  return this.authService.login(dto);
+async login(
+  @Body() dto: LoginDto,
+  @Res({ passthrough: true }) res: Response,
+) {
+  const { accessToken, user } = await this.authService.login(dto);
+
+  res.cookie('access_token', accessToken, {
+    httpOnly: true,
+    secure: false, // true только на https
+    sameSite: 'lax',
+  });
+
+  return { user };
 }
 
   @UseGuards(JwtAuthGuard)
