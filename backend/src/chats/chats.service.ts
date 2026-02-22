@@ -67,23 +67,56 @@ export class ChatsService {
   }
 
   async listMyChats(currentUserId: number) {
-    return this.prisma.chat.findMany({
-  where: { members: { some: { userId: currentUserId } } },
-  orderBy: { updatedAt: 'desc' },
-  select: {
-    id: true, title: true, isGroup: true, createdAt: true, updatedAt: true,
-    members: { select: { userId: true, role: true, user: { select: { id: true, email: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } } } },
-    messages: {
-      orderBy: { createdAt: 'desc' },
-      take: 1,
-      select: {
-        id: true, text: true, createdAt: true,
-        author: { select: { id: true, profile: { select: { firstName: true, lastName: true } } } },
+  const chats = await this.prisma.chat.findMany({
+    where: { members: { some: { userId: currentUserId } } },
+    orderBy: { updatedAt: 'desc' },
+    select: {
+      id: true,
+      title: true,
+      isGroup: true,
+      createdAt: true,
+      updatedAt: true,
+      members: {
+        select: {
+          userId: true,
+          user: {
+            select: {
+              id: true,
+              email: true,
+              profile: {
+                select: { firstName: true, lastName: true, avatarUrl: true },
+              },
+            },
+          },
+        },
+      },
+      messages: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: {
+          id: true,
+          text: true,
+          createdAt: true,
+        },
       },
     },
-  },
-});
-  }
+  });
+
+  return chats.map((chat) => {
+    if (!chat.isGroup) {
+      const companionMember = chat.members.find(
+        (m) => m.userId !== currentUserId,
+      );
+
+      return {
+        ...chat,
+        companion: companionMember?.user ?? null,
+      };
+    }
+
+    return chat;
+  });
+}
 
   async getChatById(currentUserId: number, chatId: number) {
     const chat = await this.prisma.chat.findUnique({
