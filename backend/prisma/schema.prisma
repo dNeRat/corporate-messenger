@@ -19,21 +19,53 @@ model User {
   role         Role     @default(USER)
   createdAt    DateTime @default(now())
 
-  profile      Profile?
+  memberships ChatMember[]
+  messages    Message[]
+  profile     Profile?
 }
-
 
 model Profile {
-  id        Int    @id @default(autoincrement())
-  firstName String
-  lastName  String
-  avatarUrl String?
-  position  String?
+  id         Int     @id @default(autoincrement())
+  firstName  String
+  lastName   String
+  avatarUrl  String?
+  position   String?
   department String?
 
-  userId Int   @unique
-  user   User  @relation(fields: [userId], references: [id])
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id])
 }
 
+model Chat {
+  id        Int      @id @default(autoincrement())
+  title     String?
+  isGroup   Boolean  @default(false)
+  createdAt DateTime @default(now())
 
+  members  ChatMember[]
+  messages Message[]
+}
 
+model ChatMember {
+  id       Int      @id @default(autoincrement())
+  chatId   Int
+  userId   Int
+  role     String   @default("MEMBER") // позже можно enum
+  joinedAt DateTime @default(now())
+
+  chat Chat @relation(fields: [chatId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([chatId, userId])
+}
+
+model Message {
+  id        Int      @id @default(autoincrement())
+  chatId    Int
+  authorId  Int
+  text      String
+  createdAt DateTime @default(now())
+
+  chat   Chat @relation(fields: [chatId], references: [id])
+  author User @relation(fields: [authorId], references: [id])
+}

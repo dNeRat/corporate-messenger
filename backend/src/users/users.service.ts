@@ -43,7 +43,7 @@ export class UsersService {
   return this.prisma.user.create({
     data: {
       email: data.email,
-      passwordHash, // ✅ вместо password
+      passwordHash, // вместо password
       profile: {
         create: {
           firstName: data.firstName,
