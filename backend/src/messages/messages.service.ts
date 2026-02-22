@@ -1,10 +1,13 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMessageDto } from './dto/create-message.dto';
+import { ChatGateway } from 'src/realtime/chat.gateway';
 
 @Injectable()
 export class MessagesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService,
+    private readonly chatGateway: ChatGateway,
+  ) {}
 
   private async ensureMember(userId: number, chatId: number) {
     const membership = await this.prisma.chatMember.findUnique({
@@ -44,6 +47,7 @@ async sendMessage(userId: number, chatId: number, dto: CreateMessageDto) {
       data: { updatedAt: new Date() },
     });
 
+    this.chatGateway.emitNewMessage(chatId, msg);
     return msg;
   });
 }
