@@ -37,6 +37,18 @@ export class ChatsService {
     // Участники (добавляем себя всегда)
     const uniqueUserIds = Array.from(new Set([currentUserId, ...dto.memberIds]));
 
+    // Проверяем, что все userId существуют
+    const existingUsers = await this.prisma.user.findMany({
+    where: { id: { in: uniqueUserIds } },
+    select: { id: true },
+    });
+
+    if (existingUsers.length !== uniqueUserIds.length) {
+    const existingIds = new Set(existingUsers.map(u => u.id));
+    const missing = uniqueUserIds.filter(id => !existingIds.has(id));
+    throw new ForbiddenException(`Users not found: ${missing.join(', ')}`);
+    }
+
     const chat = await this.prisma.chat.create({
       data: {
         title: dto.title,
