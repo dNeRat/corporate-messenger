@@ -103,19 +103,18 @@ export class ChatsService {
   });
 
   return chats.map((chat) => {
-    if (!chat.isGroup) {
-      const companionMember = chat.members.find(
-        (m) => m.userId !== currentUserId,
-      );
+  if (!chat.isGroup) {
+    const companionMember = chat.members.find((m) => m.userId !== currentUserId);
 
-      return {
-        ...chat,
-        companion: companionMember?.user ?? null,
-      };
-    }
+    const { members, ...rest } = chat;
+    return {
+      ...rest,
+      companion: companionMember?.user ?? null,
+    };
+  }
 
-    return chat;
-  });
+  return chat;
+});
 }
 
   async getChatById(currentUserId: number, chatId: number) {
