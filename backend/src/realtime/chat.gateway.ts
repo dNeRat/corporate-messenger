@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
+import * as cookie from 'cookie';
 
 @WebSocketGateway({
   cors: {
@@ -30,24 +31,30 @@ export class ChatGateway
 
   // Проверка JWT при подключении
   async handleConnection(socket: Socket) {
-    try {
-      const token = socket.handshake.auth?.token;
+  try {
+    // пробуем token из handshake.auth
+    let token: string | undefined = socket.handshake.auth?.token;
 
-      if (!token) {
-        throw new Error('No token provided');
+    // если нет - пробуем достать из Cookie заголовка
+    if (!token) {
+      const cookieHeader = socket.handshake.headers?.cookie;
+      if (cookieHeader) {
+        const parsed = cookie.parse(cookieHeader);
+        token = parsed['access_token'];
       }
-
-      const payload = this.jwtService.verify(token);
-
-      // сохраняем userId в сокет
-      socket.data.userId = payload.sub;
-
-      console.log('WS connected user:', payload.sub);
-    } catch (error) {
-    console.log('WS auth failed:', error?.message || error);
-    socket.disconnect();
     }
+
+    if (!token) throw new Error('No token (auth.token or access_token cookie)');
+
+    const payload = this.jwtService.verify(token);
+    socket.data.userId = payload.sub;
+
+    console.log('WS connected user:', payload.sub);
+  } catch (error: any) {
+    console.log('WS auth failed:', error?.message || error);
+    socket.disconnect(true);
   }
+}
 
   handleDisconnect(socket: Socket) {
     console.log('WS disconnected:', socket.id);
