@@ -21,13 +21,13 @@ export default function HomePage() {
     })();
   }, [router]);
 
-  if (!me) return <div className="p-6">Loading...</div>;
+  if (!me) return null;
 
   return (
     <div className="h-screen grid grid-cols-[320px_1fr]">
   <ChatList selectedChatId={selectedChatId} onSelect={setSelectedChatId} />
   <div className="h-full">
-    {selectedChatId ? <ChatWindow chatId={selectedChatId} /> : <div className="p-6 text-gray-600">Выбери чат слева</div>}
+    {selectedChatId ? (<ChatWindow chatId={selectedChatId} me={me} />) : (<div className="p-6 text-gray-600">Выбери чат слева</div>)}
   </div>
 </div>
   );

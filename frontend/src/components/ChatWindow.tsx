@@ -4,48 +4,62 @@ import { useEffect, useRef, useState } from "react";
 import { getMessages, sendMessage } from "@/lib/messages";
 import { getSocket } from "@/lib/socket";
 
-export function ChatWindow({ chatId }: { chatId: number }) {
+export function ChatWindow({
+  chatId,
+  me,
+}: {
+  chatId: number;
+  me: any;
+}) {
   const [items, setItems] = useState<any[]>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [text, setText] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    let alive = true;
+useEffect(() => {
+  let alive = true;
 
-    (async () => {
-      const page = await getMessages(chatId, undefined, 30);
-      if (!alive) return;
-      setItems(page.items.reverse()); // чтобы старые сверху
-      setNextCursor(page.nextCursor);
-      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-    })();
+  (async () => {
+    const page = await getMessages(chatId, undefined, 30);
+    if (!alive) return;
+    setItems(page.items.reverse());
+    setNextCursor(page.nextCursor);
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+  })();
 
-    const socket = getSocket();
-    socket.on("connect", () => console.log("WS connected", socket.id));
-    socket.on("disconnect", (r) => console.log("WS disconnected", r));
-    socket.on("connect_error", (e) => console.log("WS connect_error", e?.message || e));
-    socket.on("error", (e) => console.log("WS error event", e));
+  const socket = getSocket();
 
-    socket.emit("join_chat", { chatId }, (ack: any) => {
-      console.log("join ack", ack)
-    });
+  const onConnect = () => console.log("WS connected", socket.id);
+  const onDisconnect = (r: any) => console.log("WS disconnected", r);
+  const onConnectError = (e: any) => console.log("WS connect_error", e?.message || e);
+  const onError = (e: any) => console.log("WS error event", e);
 
-    const onNew = (payload: any) => {
-      if (Number(payload.chatId) !== Number(chatId)) return;
-      setItems((prev) => [...prev, payload]);
-      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 10);
-    };
+  socket.on("connect", onConnect);
+  socket.on("disconnect", onDisconnect);
+  socket.on("connect_error", onConnectError);
+  socket.on("error", onError);
 
-    socket.on("new_message", onNew);
-    socket.on("new_message", (p) => console.log("WS new_message:", p));
-    socket.on("error", (e) => console.log("WS error:", e));
+  socket.emit("join_chat", { chatId }, (ack: any) => {
+    console.log("join ack", ack);
+  });
 
-    return () => {
-      alive = false;
-      socket.off("new_message", onNew);
-    };
-  }, [chatId]);
+  const onNew = (payload: any) => {
+    if (Number(payload.chatId) !== Number(chatId)) return;
+    setItems((prev) => (prev.some((x) => x.id === payload.id) ? prev : [...prev, payload]));
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 10);
+  };
+
+  socket.on("new_message", onNew);
+
+  return () => {
+    alive = false;
+    socket.off("connect", onConnect);
+    socket.off("disconnect", onDisconnect);
+    socket.off("connect_error", onConnectError);
+    socket.off("error", onError);
+    socket.off("new_message", onNew);
+  };
+}, [chatId]);
 
   async function onSend(e: React.FormEvent) {
   e.preventDefault();
@@ -82,12 +96,47 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           </button>
         )}
 
-        {items.map((m) => (
-          <div key={m.id} className="p-2 rounded bg-gray-100">
-            <div className="text-sm text-gray-700">{m.text}</div>
-            <div className="text-xs text-gray-500">{new Date(m.createdAt).toLocaleString()}</div>
+        {items.map((m) => {
+        const myId = Number(me.sub ?? me.id);
+
+        const authorId = Number(
+        m.authorId ?? m.userId ?? m.senderId ?? m.author?.id
+        );
+
+        const isMine = authorId === myId;
+
+  return (
+    <div
+      key={m.id}
+      className={`flex ${isMine ? "justify-end" : "justify-start"}`}
+    >
+      <div
+        className={`
+          max-w-xs px-4 py-2 rounded-2xl shadow
+          ${isMine
+            ? "bg-black text-white rounded-br-sm"
+            : "bg-gray-200 text-black rounded-bl-sm"}
+        `}
+      >
+        {!isMine && (
+          <div className="text-xs font-semibold mb-1">
+            {m.author?.profile?.firstName || m.author?.email}
           </div>
-        ))}
+        )}
+
+        <div>{m.text}</div>
+
+        <div
+          className={`text-[10px] mt-1 ${
+            isMine ? "text-gray-300" : "text-gray-600"
+          }`}
+        >
+          {new Date(m.createdAt).toLocaleTimeString()}
+        </div>
+      </div>
+    </div>
+  );
+})}
         <div ref={bottomRef} />
       </div>
 
