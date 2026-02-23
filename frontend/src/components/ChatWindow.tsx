@@ -86,10 +86,10 @@ useEffect(() => {
   }
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="p-3 border-b font-semibold">Chat #{chatId}</div>
+  <div className="h-full flex flex-col overflow-hidden">
+    <div className="p-3 border-b font-semibold shrink-0">Chat #{chatId}</div>
 
-      <div className="flex-1 overflow-auto p-3 space-y-2">
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
         {nextCursor && (
           <button onClick={loadMore} className="text-sm underline text-gray-600">
             Load more
@@ -140,7 +140,7 @@ useEffect(() => {
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={onSend} className="p-3 border-t flex gap-2">
+      <form onSubmit={onSend} className="p-3 border-t flex gap-2 shrink-0">
         <input
           className="border rounded p-2 flex-1"
           placeholder="Написать сообщение..."

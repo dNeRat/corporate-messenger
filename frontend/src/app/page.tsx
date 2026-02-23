@@ -24,11 +24,18 @@ export default function HomePage() {
   if (!me) return null;
 
   return (
-    <div className="h-screen grid grid-cols-[320px_1fr]">
-  <ChatList selectedChatId={selectedChatId} onSelect={setSelectedChatId} />
-  <div className="h-full">
-    {selectedChatId ? (<ChatWindow chatId={selectedChatId} me={me} />) : (<div className="p-6 text-gray-600">Выбери чат слева</div>)}
+  <div className="h-screen overflow-hidden grid grid-cols-[320px_1fr]">
+    <aside className="h-full overflow-y-auto border-r">
+      <ChatList selectedChatId={selectedChatId} onSelect={setSelectedChatId} />
+    </aside>
+
+    <main className="h-full min-h-0 overflow-hidden">
+      {selectedChatId ? (
+        <ChatWindow chatId={selectedChatId} me={me} />
+      ) : (
+        <div className="p-6 text-gray-600">Выбери чат слева</div>
+      )}
+    </main>
   </div>
-</div>
-  );
+);
 }
