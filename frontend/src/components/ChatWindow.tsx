@@ -15,7 +15,7 @@ export function ChatWindow({
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [text, setText] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const [typingUsers, setTypingUsers] = useState<Set<number>>(new Set());
+  const [typingUsers, setTypingUsers] = useState<Map<number, string>>(new Map());
   const typingTimerRef = useRef<any>(null);
 
 useEffect(() => {
@@ -56,9 +56,14 @@ useEffect(() => {
   const onTyping = (p: any) => {
   if (Number(p.chatId) !== Number(chatId)) return;
   const uid = Number(p.userId);
-  if (uid === Number(me.sub ?? me.id)) return;
+  const myId = Number(me.sub ?? me.id);
+  if (uid === myId) return;
 
-  setTypingUsers(prev => new Set(prev).add(uid));
+  setTypingUsers(prev => {
+    const next = new Map(prev);
+    next.set(uid, p.label || `User ${uid}`);
+    return next;
+  });
 };
 
 const onStopTyping = (p: any) => {
@@ -66,7 +71,7 @@ const onStopTyping = (p: any) => {
   const uid = Number(p.userId);
 
   setTypingUsers(prev => {
-    const next = new Set(prev);
+    const next = new Map(prev);
     next.delete(uid);
     return next;
   });
@@ -166,9 +171,11 @@ socket.on("stop_typing", onStopTyping);
         <div ref={bottomRef} />
       </div>
       {typingUsers.size > 0 && (
-      <div className="px-3 py-1 text-xs text-gray-500">
-        печатает…
-      </div>
+        <div className="px-3 py-1 text-xs text-gray-500">
+          {typingUsers.size === 1
+            ? `${Array.from(typingUsers.values())[0]} печатает…`
+            : `${typingUsers.size} человека печатают…`}
+        </div>
       )}
       <form onSubmit={onSend} className="p-3 border-t flex gap-2 shrink-0">
         <input

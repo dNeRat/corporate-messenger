@@ -88,15 +88,29 @@ export class ChatGateway
     return { joined: data.chatId };
   }
 
+  private async getUserLabel(userId: number) {
+  const u = await this.prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      email: true,
+      profile: { select: { firstName: true, lastName: true } },
+    },
+  });
+
+  const name = [u?.profile?.firstName, u?.profile?.lastName].filter(Boolean).join(' ');
+  return name || u?.email || `User ${userId}`;
+  }
+
   @SubscribeMessage('typing')
-  handleTyping(
+  async handleTyping(
     @MessageBody() data: { chatId: number },
     @ConnectedSocket() socket: Socket,
   ) {
     const userId = socket.data.userId;
     if (!userId) return;
 
-    socket.to(`chat:${data.chatId}`).emit('typing', { chatId: data.chatId, userId });
+    const label = await this.getUserLabel(userId);
+    socket.to(`chat:${data.chatId}`).emit('typing', { chatId: data.chatId, userId, label });
   }
 
   @SubscribeMessage('stop_typing')
