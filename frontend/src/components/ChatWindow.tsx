@@ -4,110 +4,144 @@ import { useEffect, useRef, useState } from "react";
 import { getMessages, sendMessage } from "@/lib/messages";
 import { getSocket } from "@/lib/socket";
 
-export function ChatWindow({
-  chatId,
-  me,
-}: {
-  chatId: number;
-  me: any;
+export function ChatWindow({ chatId, me, firstUnreadId, onConsumedFirstUnread }: {
+  chatId: number; me: any; firstUnreadId: number | null; onConsumedFirstUnread: () => void;
 }) {
   const [items, setItems] = useState<any[]>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [text, setText] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const [typingUsers, setTypingUsers] = useState<Map<number, string>>(new Map());
+
+  const [typingUsers, setTypingUsers] = useState<Map<number, string>>(
+    new Map(),
+  );
   const typingTimerRef = useRef<any>(null);
 
-useEffect(() => {
-  let alive = true;
+  const myId = Number(me?.sub ?? me?.id);
 
-  (async () => {
-    const page = await getMessages(chatId, undefined, 30);
-    if (!alive) return;
-    setItems(page.items.reverse());
-    setNextCursor(page.nextCursor);
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-  })();
+  function scrollToBottom(smooth = true) {
+    bottomRef.current?.scrollIntoView({
+      behavior: smooth ? "smooth" : "auto",
+    });
+  }
 
-  const socket = getSocket();
+  useEffect(() => {
+    let alive = true;
 
-  const onConnect = () => console.log("WS connected", socket.id);
-  const onDisconnect = (r: any) => console.log("WS disconnected", r);
-  const onConnectError = (e: any) => console.log("WS connect_error", e?.message || e);
-  const onError = (e: any) => console.log("WS error event", e);
+    // reset typing state on chat switch
+    setTypingUsers(new Map());
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
 
-  socket.on("connect", onConnect);
-  socket.on("disconnect", onDisconnect);
-  socket.on("connect_error", onConnectError);
-  socket.on("error", onError);
+    (async () => {
+      const page = await getMessages(chatId, undefined, 30);
+      if (!alive) return;
 
-  socket.emit("join_chat", { chatId }, (ack: any) => {
-    console.log("join ack", ack);
-  });
+      setItems(page.items.reverse());
+      setNextCursor(page.nextCursor);
 
-  const onNew = (payload: any) => {
-    if (Number(payload.chatId) !== Number(chatId)) return;
-    setItems((prev) => (prev.some((x) => x.id === payload.id) ? prev : [...prev, payload]));
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 10);
-  };
+      setTimeout(() => {
+        if (firstUnreadId) {
+          const el = document.getElementById(`msg-${firstUnreadId}`);
+          if (el) {
+            el.scrollIntoView({ behavior: "auto", block: "start" });
+            return;
+          }
+        }
+        scrollToBottom(false);
+        onConsumedFirstUnread();
+      }, 50);
+    })();
 
-  socket.on("new_message", onNew);
+    const socket = getSocket();
 
-  const onTyping = (p: any) => {
-  if (Number(p.chatId) !== Number(chatId)) return;
-  const uid = Number(p.userId);
-  const myId = Number(me.sub ?? me.id);
-  if (uid === myId) return;
+    const onConnect = () => console.log("WS connected", socket.id);
+    const onDisconnect = (r: any) => console.log("WS disconnected", r);
+    const onConnectError = (e: any) =>
+      console.log("WS connect_error", e?.message || e);
+    const onError = (e: any) => console.log("WS error event", e);
 
-  setTypingUsers(prev => {
-    const next = new Map(prev);
-    next.set(uid, p.label || `User ${uid}`);
-    return next;
-  });
-};
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("connect_error", onConnectError);
+    socket.on("error", onError);
 
-const onStopTyping = (p: any) => {
-  if (Number(p.chatId) !== Number(chatId)) return;
-  const uid = Number(p.userId);
+    socket.emit("join_chat", { chatId }, (ack: any) => {
+      console.log("join ack", ack);
+    });
 
-  setTypingUsers(prev => {
-    const next = new Map(prev);
-    next.delete(uid);
-    return next;
-  });
-};
+    const onNew = (payload: any) => {
+      if (Number(payload.chatId) !== Number(chatId)) return;
 
-socket.on("typing", onTyping);
-socket.on("stop_typing", onStopTyping);
+      setItems((prev) =>
+        prev.some((x) => x.id === payload.id) ? prev : [...prev, payload],
+      );
 
-  return () => {
-    alive = false;
-    socket.off("connect", onConnect);
-    socket.off("disconnect", onDisconnect);
-    socket.off("connect_error", onConnectError);
-    socket.off("error", onError);
-    socket.off("new_message", onNew);
-    socket.off("typing", onTyping);
-    socket.off("stop_typing", onStopTyping);
-  };
-}, [chatId]);
+      // ✅ не тащим вниз, если открыли чат на "первом непрочитанном"
+      if (!firstUnreadId) {
+        setTimeout(() => scrollToBottom(true), 10);
+      }
+    };
+
+    const onTyping = (p: any) => {
+      if (Number(p.chatId) !== Number(chatId)) return;
+      const uid = Number(p.userId);
+      if (uid === myId) return;
+
+      setTypingUsers((prev) => {
+        const next = new Map(prev);
+        next.set(uid, p.label || `User ${uid}`);
+        return next;
+      });
+    };
+
+    const onStopTyping = (p: any) => {
+      if (Number(p.chatId) !== Number(chatId)) return;
+      const uid = Number(p.userId);
+
+      setTypingUsers((prev) => {
+        const next = new Map(prev);
+        next.delete(uid);
+        return next;
+      });
+    };
+
+    socket.on("new_message", onNew);
+    socket.on("typing", onTyping);
+    socket.on("stop_typing", onStopTyping);
+
+    return () => {
+      alive = false;
+
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("connect_error", onConnectError);
+      socket.off("error", onError);
+
+      socket.off("new_message", onNew);
+      socket.off("typing", onTyping);
+      socket.off("stop_typing", onStopTyping);
+    };
+  }, [chatId, firstUnreadId, myId]);
 
   async function onSend(e: React.FormEvent) {
-  e.preventDefault();
-  const t = text.trim();
-  if (!t) return;
+    e.preventDefault();
+    const t = text.trim();
+    if (!t) return;
 
-  setText("");
+    setText("");
 
-  const msg = await sendMessage(chatId, t);
+    const msg = await sendMessage(chatId, t);
 
-  setItems((prev) => {
-    if (prev.some((x) => x.id === msg.id)) return prev;
-    return [...prev, msg];
-  });
-  getSocket().emit("stop_typing", { chatId });
-  setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 10);
-}
+    // fallback, если WS задержится
+    setItems((prev) => (prev.some((x) => x.id === msg.id) ? prev : [...prev, msg]));
+
+    getSocket().emit("stop_typing", { chatId });
+
+    // после своего сообщения можно скроллить вниз всегда
+    setTimeout(() => scrollToBottom(true), 10);
+  }
 
   async function loadMore() {
     if (!nextCursor) return;
@@ -117,8 +151,8 @@ socket.on("stop_typing", onStopTyping);
   }
 
   return (
-  <div className="h-full flex flex-col overflow-hidden">
-    <div className="p-3 border-b font-semibold shrink-0">Chat #{chatId}</div>
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="p-3 border-b font-semibold shrink-0">Chat #{chatId}</div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
         {nextCursor && (
@@ -128,48 +162,50 @@ socket.on("stop_typing", onStopTyping);
         )}
 
         {items.map((m) => {
-        const myId = Number(me.sub ?? me.id);
+          const authorId = Number(
+            m.authorId ?? m.userId ?? m.senderId ?? m.author?.id,
+          );
+          const isMine = authorId === myId;
 
-        const authorId = Number(
-        m.authorId ?? m.userId ?? m.senderId ?? m.author?.id
-        );
+          return (
+            <div
+              id={`msg-${m.id}`}
+              key={m.id}
+              className={`flex ${isMine ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={`
+                  max-w-xs px-4 py-2 rounded-2xl shadow
+                  ${
+                    isMine
+                      ? "bg-black text-white rounded-br-sm"
+                      : "bg-gray-200 text-black rounded-bl-sm"
+                  }
+                `}
+              >
+                {!isMine && (
+                  <div className="text-xs font-semibold mb-1">
+                    {m.author?.profile?.firstName || m.author?.email || "Unknown"}
+                  </div>
+                )}
 
-        const isMine = authorId === myId;
+                <div>{m.text}</div>
 
-  return (
-    <div
-      key={m.id}
-      className={`flex ${isMine ? "justify-end" : "justify-start"}`}
-    >
-      <div
-        className={`
-          max-w-xs px-4 py-2 rounded-2xl shadow
-          ${isMine
-            ? "bg-black text-white rounded-br-sm"
-            : "bg-gray-200 text-black rounded-bl-sm"}
-        `}
-      >
-        {!isMine && (
-          <div className="text-xs font-semibold mb-1">
-            {m.author?.profile?.firstName || m.author?.email}
-          </div>
-        )}
+                <div
+                  className={`text-[10px] mt-1 ${
+                    isMine ? "text-gray-300" : "text-gray-600"
+                  }`}
+                >
+                  {new Date(m.createdAt).toLocaleTimeString()}
+                </div>
+              </div>
+            </div>
+          );
+        })}
 
-        <div>{m.text}</div>
-
-        <div
-          className={`text-[10px] mt-1 ${
-            isMine ? "text-gray-300" : "text-gray-600"
-          }`}
-        >
-          {new Date(m.createdAt).toLocaleTimeString()}
-        </div>
-      </div>
-    </div>
-  );
-})}
         <div ref={bottomRef} />
       </div>
+
       {typingUsers.size > 0 && (
         <div className="px-3 py-1 text-xs text-gray-500">
           {typingUsers.size === 1
@@ -177,6 +213,7 @@ socket.on("stop_typing", onStopTyping);
             : `${typingUsers.size} человека печатают…`}
         </div>
       )}
+
       <form onSubmit={onSend} className="p-3 border-t flex gap-2 shrink-0">
         <input
           className="border rounded p-2 flex-1"
