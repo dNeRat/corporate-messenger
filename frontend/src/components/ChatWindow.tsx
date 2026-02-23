@@ -15,6 +15,8 @@ export function ChatWindow({
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [text, setText] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const [typingUsers, setTypingUsers] = useState<Set<number>>(new Set());
+  const typingTimerRef = useRef<any>(null);
 
 useEffect(() => {
   let alive = true;
@@ -51,6 +53,28 @@ useEffect(() => {
 
   socket.on("new_message", onNew);
 
+  const onTyping = (p: any) => {
+  if (Number(p.chatId) !== Number(chatId)) return;
+  const uid = Number(p.userId);
+  if (uid === Number(me.sub ?? me.id)) return;
+
+  setTypingUsers(prev => new Set(prev).add(uid));
+};
+
+const onStopTyping = (p: any) => {
+  if (Number(p.chatId) !== Number(chatId)) return;
+  const uid = Number(p.userId);
+
+  setTypingUsers(prev => {
+    const next = new Set(prev);
+    next.delete(uid);
+    return next;
+  });
+};
+
+socket.on("typing", onTyping);
+socket.on("stop_typing", onStopTyping);
+
   return () => {
     alive = false;
     socket.off("connect", onConnect);
@@ -58,6 +82,8 @@ useEffect(() => {
     socket.off("connect_error", onConnectError);
     socket.off("error", onError);
     socket.off("new_message", onNew);
+    socket.off("typing", onTyping);
+    socket.off("stop_typing", onStopTyping);
   };
 }, [chatId]);
 
@@ -74,7 +100,7 @@ useEffect(() => {
     if (prev.some((x) => x.id === msg.id)) return prev;
     return [...prev, msg];
   });
-
+  getSocket().emit("stop_typing", { chatId });
   setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 10);
 }
 
@@ -139,13 +165,28 @@ useEffect(() => {
 })}
         <div ref={bottomRef} />
       </div>
-
+      {typingUsers.size > 0 && (
+      <div className="px-3 py-1 text-xs text-gray-500">
+        печатает…
+      </div>
+      )}
       <form onSubmit={onSend} className="p-3 border-t flex gap-2 shrink-0">
         <input
           className="border rounded p-2 flex-1"
           placeholder="Написать сообщение..."
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            const v = e.target.value;
+            setText(v);
+
+            const socket = getSocket();
+            socket.emit("typing", { chatId });
+
+            if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+            typingTimerRef.current = setTimeout(() => {
+              socket.emit("stop_typing", { chatId });
+            }, 800);
+          }}
         />
         <button className="bg-black text-white rounded px-4">Send</button>
       </form>

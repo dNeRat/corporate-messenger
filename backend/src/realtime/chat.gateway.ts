@@ -88,7 +88,28 @@ export class ChatGateway
     return { joined: data.chatId };
   }
 
-  
+  @SubscribeMessage('typing')
+  handleTyping(
+    @MessageBody() data: { chatId: number },
+    @ConnectedSocket() socket: Socket,
+  ) {
+    const userId = socket.data.userId;
+    if (!userId) return;
+
+    socket.to(`chat:${data.chatId}`).emit('typing', { chatId: data.chatId, userId });
+  }
+
+  @SubscribeMessage('stop_typing')
+  handleStopTyping(
+    @MessageBody() data: { chatId: number },
+    @ConnectedSocket() socket: Socket,
+  ) {
+    const userId = socket.data.userId;
+    if (!userId) return;
+
+    socket.to(`chat:${data.chatId}`).emit('stop_typing', { chatId: data.chatId, userId });
+  }
+
   emitNewMessage(chatId: number, payload: any) {
     this.server.to(`chat:${chatId}`).emit('new_message', payload);
   }
