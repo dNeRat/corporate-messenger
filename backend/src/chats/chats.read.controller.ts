@@ -1,23 +1,30 @@
-import { Controller, Post, Param, Req, UseGuards } from "@nestjs/common";
+import { Controller, Param, Req, UseGuards, Get, Post } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
-import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
+import { JwtAuthGuard } from "src/auth/jwt-auth.guard";
 
 @UseGuards(JwtAuthGuard)
 @Controller("chats")
 export class ChatsReadController {
   constructor(private prisma: PrismaService) {}
 
+  @Get(":id/read")
+  getRead(@Param("id") id: string) {
+    const chatId = Number(id);
+    return this.prisma.chatRead.findMany({
+      where: { chatId },
+      select: { userId: true, lastReadAt: true },
+    });
+  }
+
   @Post(":id/read")
-  async markRead(@Param("id") id: string, @Req() req: any) {
+  markRead(@Param("id") id: string, @Req() req: any) {
     const chatId = Number(id);
     const userId = Number(req.user.sub);
 
-    const row = await this.prisma.chatRead.upsert({
+    return this.prisma.chatRead.upsert({
       where: { chatId_userId: { chatId, userId } },
       update: { lastReadAt: new Date() },
       create: { chatId, userId, lastReadAt: new Date() },
     });
-
-    return row;
   }
 }

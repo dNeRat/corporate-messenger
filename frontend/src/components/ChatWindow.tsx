@@ -54,6 +54,12 @@ export function ChatWindow({
 
       setItems(page.items.reverse());
       setNextCursor(page.nextCursor);
+      try {
+        const rr = await api.get(`/chats/${chatId}/read`);
+        const map: Record<number, string> = {};
+        for (const row of rr.data) map[Number(row.userId)] = String(row.lastReadAt);
+        setReadMap(map);
+      } catch {}
 
       setTimeout(async () => {
         const pending = pendingFirstUnreadRef.current;
