@@ -3,21 +3,37 @@
 import { useEffect, useRef, useState } from "react";
 import { getMessages, sendMessage } from "@/lib/messages";
 import { getSocket } from "@/lib/socket";
+import { api } from "@/lib/axios";
 
-export function ChatWindow({ chatId, me, firstUnreadId, onConsumedFirstUnread }: {
-  chatId: number; me: any; firstUnreadId: number | null; onConsumedFirstUnread: () => void;
+export function ChatWindow({
+  chatId,
+  me,
+  firstUnreadId,
+  onConsumedFirstUnread,
+}: {
+  chatId: number;
+  me: any;
+  firstUnreadId: number | null;
+  onConsumedFirstUnread: () => void;
 }) {
   const [items, setItems] = useState<any[]>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [text, setText] = useState("");
+
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  const [typingUsers, setTypingUsers] = useState<Map<number, string>>(
-    new Map(),
-  );
+  const [typingUsers, setTypingUsers] = useState<Map<number, string>>(new Map());
   const typingTimerRef = useRef<any>(null);
 
+  const [readMap, setReadMap] = useState<Record<number, string>>({});
+
   const myId = Number(me?.sub ?? me?.id);
+
+  // чтобы после consume firstUnread новые сообщения могли автоскроллиться
+  const pendingFirstUnreadRef = useRef<number | null>(null);
+  useEffect(() => {
+    pendingFirstUnreadRef.current = firstUnreadId;
+  }, [firstUnreadId]);
 
   function scrollToBottom(smooth = true) {
     bottomRef.current?.scrollIntoView({
@@ -28,8 +44,8 @@ export function ChatWindow({ chatId, me, firstUnreadId, onConsumedFirstUnread }:
   useEffect(() => {
     let alive = true;
 
-    // reset typing state on chat switch
     setTypingUsers(new Map());
+    setReadMap({});
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
 
     (async () => {
@@ -39,16 +55,26 @@ export function ChatWindow({ chatId, me, firstUnreadId, onConsumedFirstUnread }:
       setItems(page.items.reverse());
       setNextCursor(page.nextCursor);
 
-      setTimeout(() => {
-        if (firstUnreadId) {
-          const el = document.getElementById(`msg-${firstUnreadId}`);
+      setTimeout(async () => {
+        const pending = pendingFirstUnreadRef.current;
+        if (pending) {
+          const el = document.getElementById(`msg-${pending}`);
           if (el) {
             el.scrollIntoView({ behavior: "auto", block: "start" });
-            return;
+          } else {
+            scrollToBottom(false);
           }
+          // consume pending unread (важно!)
+          pendingFirstUnreadRef.current = null;
+          onConsumedFirstUnread();
+        } else {
+          scrollToBottom(false);
         }
-        scrollToBottom(false);
-        onConsumedFirstUnread();
+        try {
+          await api.post(`/chats/${chatId}/read`);
+          getSocket().emit("mark_read", { chatId });
+        } catch {
+        }
       }, 50);
     })();
 
@@ -56,8 +82,7 @@ export function ChatWindow({ chatId, me, firstUnreadId, onConsumedFirstUnread }:
 
     const onConnect = () => console.log("WS connected", socket.id);
     const onDisconnect = (r: any) => console.log("WS disconnected", r);
-    const onConnectError = (e: any) =>
-      console.log("WS connect_error", e?.message || e);
+    const onConnectError = (e: any) => console.log("WS connect_error", e?.message || e);
     const onError = (e: any) => console.log("WS error event", e);
 
     socket.on("connect", onConnect);
@@ -72,12 +97,10 @@ export function ChatWindow({ chatId, me, firstUnreadId, onConsumedFirstUnread }:
     const onNew = (payload: any) => {
       if (Number(payload.chatId) !== Number(chatId)) return;
 
-      setItems((prev) =>
-        prev.some((x) => x.id === payload.id) ? prev : [...prev, payload],
-      );
+      setItems((prev) => (prev.some((x) => x.id === payload.id) ? prev : [...prev, payload]));
 
-      // ✅ не тащим вниз, если открыли чат на "первом непрочитанном"
-      if (!firstUnreadId) {
+      // автоскроллим вниз только если не висим на первом непрочитанном
+      if (!pendingFirstUnreadRef.current) {
         setTimeout(() => scrollToBottom(true), 10);
       }
     };
@@ -105,9 +128,17 @@ export function ChatWindow({ chatId, me, firstUnreadId, onConsumedFirstUnread }:
       });
     };
 
+    const onReadReceipt = (p: any) => {
+      if (Number(p.chatId) !== Number(chatId)) return;
+      const uid = Number(p.userId);
+      if (!uid || !p.lastReadAt) return;
+      setReadMap((prev) => ({ ...prev, [uid]: String(p.lastReadAt) }));
+    };
+
     socket.on("new_message", onNew);
     socket.on("typing", onTyping);
     socket.on("stop_typing", onStopTyping);
+    socket.on("read_receipt", onReadReceipt);
 
     return () => {
       alive = false;
@@ -122,8 +153,9 @@ export function ChatWindow({ chatId, me, firstUnreadId, onConsumedFirstUnread }:
       socket.off("new_message", onNew);
       socket.off("typing", onTyping);
       socket.off("stop_typing", onStopTyping);
+      socket.off("read_receipt", onReadReceipt);
     };
-  }, [chatId, firstUnreadId, myId]);
+  }, [chatId, myId, onConsumedFirstUnread]);
 
   async function onSend(e: React.FormEvent) {
     e.preventDefault();
@@ -139,7 +171,7 @@ export function ChatWindow({ chatId, me, firstUnreadId, onConsumedFirstUnread }:
 
     getSocket().emit("stop_typing", { chatId });
 
-    // после своего сообщения можно скроллить вниз всегда
+    // после своего сообщения — вниз
     setTimeout(() => scrollToBottom(true), 10);
   }
 
@@ -148,6 +180,15 @@ export function ChatWindow({ chatId, me, firstUnreadId, onConsumedFirstUnread }:
     const page = await getMessages(chatId, nextCursor, 30);
     setNextCursor(page.nextCursor);
     setItems((prev) => [...page.items.reverse(), ...prev]);
+  }
+
+  function isReadBySomeoneElse(messageCreatedAt: string) {
+    const msgTs = new Date(messageCreatedAt).getTime();
+    return Object.entries(readMap).some(([uid, ts]) => {
+      const id = Number(uid);
+      if (id === myId) return false;
+      return new Date(ts).getTime() >= msgTs;
+    });
   }
 
   return (
@@ -162,9 +203,7 @@ export function ChatWindow({ chatId, me, firstUnreadId, onConsumedFirstUnread }:
         )}
 
         {items.map((m) => {
-          const authorId = Number(
-            m.authorId ?? m.userId ?? m.senderId ?? m.author?.id,
-          );
+          const authorId = Number(m.authorId ?? m.userId ?? m.senderId ?? m.author?.id);
           const isMine = authorId === myId;
 
           return (
@@ -191,12 +230,14 @@ export function ChatWindow({ chatId, me, firstUnreadId, onConsumedFirstUnread }:
 
                 <div>{m.text}</div>
 
-                <div
-                  className={`text-[10px] mt-1 ${
-                    isMine ? "text-gray-300" : "text-gray-600"
-                  }`}
-                >
-                  {new Date(m.createdAt).toLocaleTimeString()}
+                <div className={`text-[10px] mt-1 flex items-center gap-2 ${isMine ? "text-gray-300" : "text-gray-600"}`}>
+                  <span>{new Date(m.createdAt).toLocaleTimeString()}</span>
+
+                  {isMine && (
+                    <span>
+                      {isReadBySomeoneElse(m.createdAt) ? "✓✓" : "✓"}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
