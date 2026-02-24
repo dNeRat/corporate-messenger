@@ -22,6 +22,7 @@ model User {
   memberships ChatMember[]
   messages    Message[]
   profile     Profile?
+  chatReads   ChatRead[]
 }
 
 model Profile {
@@ -45,6 +46,7 @@ model Chat {
 
   members   ChatMember[]
   messages  Message[]
+  chatReads ChatRead[]
 }
 
 model ChatMember {
@@ -71,4 +73,17 @@ model Message {
   author User @relation(fields: [authorId], references: [id])
 
   @@index([chatId, createdAt])
+}
+
+model ChatRead {
+  id         Int      @id @default(autoincrement())
+  chatId     Int
+  userId     Int
+  lastReadAt DateTime @default(now())
+
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId])
+  @@index([chatId])
 }

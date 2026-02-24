@@ -124,6 +124,25 @@ export class ChatGateway
     socket.to(`chat:${data.chatId}`).emit('stop_typing', { chatId: data.chatId, userId });
   }
 
+  @SubscribeMessage("mark_read")
+async handleMarkRead(@MessageBody() data: { chatId: number }, @ConnectedSocket() socket: any) {
+  const userId = Number(socket.data.userId);
+  const chatId = Number(data.chatId);
+  if (!userId || !chatId) return;
+
+  const row = await this.prisma.chatRead.upsert({
+    where: { chatId_userId: { chatId, userId } },
+    update: { lastReadAt: new Date() },
+    create: { chatId, userId, lastReadAt: new Date() },
+  });
+
+  socket.to(`chat:${chatId}`).emit("read_receipt", {
+    chatId,
+    userId,
+    lastReadAt: row.lastReadAt,
+  });
+}
+
   emitNewMessage(chatId: number, payload: any) {
     this.server.to(`chat:${chatId}`).emit('new_message', payload);
   }
