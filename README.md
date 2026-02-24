@@ -267,9 +267,10 @@ http://localhost:5555
 - [x] Realtime WebSocket
 - [x] httpOnly Cookie Auth
 - [x] Frontend (Next.js)
+- [x] Typing indicator
+- [x] Read mark
 - [ ] Refresh Tokens
 - [ ] File attachments
-- [ ] Typing indicator
 - [ ] Docker
 - [ ] Deployment
 
