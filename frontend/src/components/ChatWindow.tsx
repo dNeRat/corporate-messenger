@@ -4,14 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { getMessages, sendMessage } from "@/lib/messages";
 import { getSocket } from "@/lib/socket";
 import { api } from "@/lib/axios";
+import type { Chat } from "@/lib/types";
 
 export function ChatWindow({
   chatId,
+  chat,
   me,
   firstUnreadId,
   onConsumedFirstUnread,
 }: {
   chatId: number;
+  chat: Chat | null;
   me: any;
   firstUnreadId: number | null;
   onConsumedFirstUnread: () => void;
@@ -197,9 +200,24 @@ export function ChatWindow({
     });
   }
 
+  const headerTitle = (() => {
+    if (!chat) return `Chat #${chatId}`;
+    if (chat.isGroup) {
+      return chat.title?.trim() || "Группа";
+    }
+    const p = chat.companion?.profile;
+    const name = [p?.firstName, p?.lastName].filter(Boolean).join(" ");
+    return name || chat.companion?.email || `Chat #${chatId}`;
+  })();
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="p-3 border-b font-semibold shrink-0">Chat #{chatId}</div>
+      <div className="p-3 border-b shrink-0 flex items-center justify-between gap-3">
+        <div className="font-semibold truncate">{headerTitle}</div>
+        {chat?.isGroup && (
+          <div className="text-xs text-gray-500 shrink-0">#{chatId}</div>
+        )}
+      </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
         {nextCursor && (

@@ -250,6 +250,7 @@ export default function HomePage() {
         {selectedChatId ? (
           <ChatWindow
             chatId={selectedChatId}
+            chat={chats.find((c) => c.id === selectedChatId) ?? null}
             me={me}
             firstUnreadId={firstUnreadId}
             onConsumedFirstUnread={() => setPendingFirstUnreadId(null)}
