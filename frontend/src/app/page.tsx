@@ -7,6 +7,7 @@ import { ChatList } from "@/components/ChatList";
 import { ChatWindow } from "@/components/ChatWindow";
 import { getSocket } from "@/lib/socket";
 import { createChat, getChats } from "@/lib/chats";
+import { logout } from "@/lib/auth";
 import type { Chat } from "@/lib/types";
 
 export default function HomePage() {
@@ -28,6 +29,7 @@ export default function HomePage() {
   const [memberIdsInput, setMemberIdsInput] = useState("");
   const [isGroup, setIsGroup] = useState(false);
   const [title, setTitle] = useState("");
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const firstUnreadId = pendingFirstUnreadId;
 
@@ -37,16 +39,16 @@ export default function HomePage() {
   }, [selectedChatId]);
 
   function selectChat(chatId: number) {
-  const firstId = unread[chatId]?.firstId ?? null;
+    const firstId = unread[chatId]?.firstId ?? null;
 
-  setPendingFirstUnreadId(firstId); // сохранили до сброса
-  setSelectedChatId(chatId);
+    setPendingFirstUnreadId(firstId); // Сохранили до сброса
+    setSelectedChatId(chatId);
 
-  setUnread((prev) => {
-    const next = { ...prev };
-    delete next[chatId];
-    return next;
-  });
+    setUnread((prev) => {
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
   }
 
   async function refreshChats() {
@@ -169,6 +171,31 @@ export default function HomePage() {
   return (
     <div className="h-screen overflow-hidden grid grid-cols-[320px_1fr]">
       <aside className="h-full overflow-y-auto border-r">
+        <div className="p-3 border-b flex items-center justify-between">
+          <div className="text-sm text-gray-700 truncate">
+            {me?.profile?.firstName || me?.email || "User"}
+          </div>
+          <button
+            className="text-sm underline disabled:opacity-60"
+            disabled={loggingOut}
+            onClick={async () => {
+              if (loggingOut) return;
+              setLoggingOut(true);
+              try {
+                await logout();
+              } finally {
+                setMe(null);
+                setSelectedChatId(null);
+                setUnread({});
+                setChats([]);
+                router.replace("/login");
+              }
+            }}
+          >
+            {loggingOut ? "Выходим..." : "Выйти"}
+          </button>
+        </div>
+
         <form onSubmit={handleCreateChat} className="p-3 border-b space-y-2">
           <div className="font-semibold">Новый чат</div>
 

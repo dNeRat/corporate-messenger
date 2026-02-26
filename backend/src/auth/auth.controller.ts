@@ -57,4 +57,14 @@ async me(@Req() req: Request & { user: any }) {
     select: { id: true, email: true, createdAt: true, profile: true },
   });
 }
+
+@Post('logout')
+logout(@Res({ passthrough: true }) res: Response) {
+  res.clearCookie('access_token', {
+    httpOnly: true,
+    secure: false, // true только на https
+    sameSite: 'lax',
+  });
+  return { ok: true };
+}
 }

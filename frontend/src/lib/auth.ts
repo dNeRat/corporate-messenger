@@ -8,3 +8,7 @@ export async function getMe() {
     return null;
   }
 }
+
+export async function logout() {
+  await api.post("/auth/logout");
+}
