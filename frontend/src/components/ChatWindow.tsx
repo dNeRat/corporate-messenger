@@ -214,9 +214,7 @@ export function ChatWindow({
     <div className="h-full flex flex-col overflow-hidden">
       <div className="p-3 border-b shrink-0 flex items-center justify-between gap-3">
         <div className="font-semibold truncate">{headerTitle}</div>
-        {chat?.isGroup && (
-          <div className="text-xs text-gray-500 shrink-0">#{chatId}</div>
-        )}
+        <div className="text-xs text-gray-500 shrink-0">#{chatId}</div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
