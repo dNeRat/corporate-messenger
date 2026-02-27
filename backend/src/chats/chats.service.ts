@@ -30,6 +30,16 @@ export class ChatsService {
     return membership;
   }
 
+  private async ensureGroupChat(chatId: number) {
+    const chat = await this.prisma.chat.findUnique({
+      where: { id: chatId },
+      select: { id: true, isGroup: true },
+    });
+    if (!chat) throw new NotFoundException('Chat not found');
+    if (!chat.isGroup) throw new ForbiddenException('Only group chats are supported');
+    return chat;
+  }
+
   async createChat(currentUserId: number, dto: CreateChatDto) {
     // Личный чат: ровно 1 собеседник + текущий = 2 участника
     if (!dto.isGroup) {
@@ -262,5 +272,59 @@ export class ChatsService {
       data: { role: dto.role },
       select: { userId: true, role: true },
     });
+  }
+
+  async listPins(currentUserId: number, chatId: number) {
+    await this.ensureMember(currentUserId, chatId);
+    await this.ensureGroupChat(chatId);
+
+    return this.prisma.messagePin.findMany({
+      where: { chatId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        messageId: true,
+        createdAt: true,
+        pinnedBy: { select: { id: true, email: true, profile: { select: { firstName: true, lastName: true } } } },
+        message: {
+          select: {
+            id: true,
+            text: true,
+            createdAt: true,
+            deletedAt: true,
+            author: { select: { id: true, email: true, profile: { select: { firstName: true, lastName: true } } } },
+          },
+        },
+      },
+    });
+  }
+
+  async pinMessage(currentUserId: number, chatId: number, messageId: number) {
+    await this.ensureMember(currentUserId, chatId);
+    await this.ensureGroupChat(chatId);
+
+    const msg = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, chatId: true },
+    });
+    if (!msg || msg.chatId !== chatId) throw new NotFoundException('Message not found');
+
+    return this.prisma.messagePin.upsert({
+      where: { chatId_messageId: { chatId, messageId } },
+      update: {},
+      create: { chatId, messageId, pinnedById: currentUserId },
+      select: { id: true, messageId: true },
+    });
+  }
+
+  async unpinMessage(currentUserId: number, chatId: number, messageId: number) {
+    await this.ensureMember(currentUserId, chatId);
+    await this.ensureGroupChat(chatId);
+
+    await this.prisma.messagePin.delete({
+      where: { chatId_messageId: { chatId, messageId } },
+    });
+
+    return { ok: true };
   }
 }

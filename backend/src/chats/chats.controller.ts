@@ -62,4 +62,27 @@ export class ChatsController {
   ) {
     return this.chatsService.setMemberRole(req.user.sub, id, userId, dto);
   }
+
+  @Get(':id/pins')
+  listPins(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.chatsService.listPins(req.user.sub, id);
+  }
+
+  @Post(':id/pins/:messageId')
+  pinMessage(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('messageId', ParseIntPipe) messageId: number,
+  ) {
+    return this.chatsService.pinMessage(req.user.sub, id, messageId);
+  }
+
+  @Delete(':id/pins/:messageId')
+  unpinMessage(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('messageId', ParseIntPipe) messageId: number,
+  ) {
+    return this.chatsService.unpinMessage(req.user.sub, id, messageId);
+  }
 }

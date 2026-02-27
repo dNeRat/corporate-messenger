@@ -8,8 +8,11 @@ import type { Chat } from "@/lib/types";
 import {
   addChatMembers,
   getChatById,
+  getChatPins,
   removeChatMember,
+  pinChatMessage,
   setChatMemberRole,
+  unpinChatMessage,
   updateChatTitle,
 } from "@/lib/chats";
 
@@ -50,6 +53,8 @@ export function ChatWindow({
   const [memberInput, setMemberInput] = useState("");
   const [savingTitle, setSavingTitle] = useState(false);
   const [mutatingMember, setMutatingMember] = useState(false);
+  const [pins, setPins] = useState<any[]>([]);
+  const [pinsLoading, setPinsLoading] = useState(false);
 
   const myId = Number(me?.sub ?? me?.id);
 
@@ -74,6 +79,7 @@ export function ChatWindow({
     setReplyTo(null);
     setEditingId(null);
     setEditText("");
+    setPins([]);
 
     (async () => {
       const page = await getMessages(chatId, undefined, 30);
@@ -109,6 +115,16 @@ export function ChatWindow({
         } catch {
         }
       }, 50);
+
+      if (chat?.isGroup) {
+        setPinsLoading(true);
+        try {
+          setPins(await getChatPins(chatId));
+        } catch {
+        } finally {
+          setPinsLoading(false);
+        }
+      }
     })();
 
     const socket = getSocket();
@@ -260,6 +276,26 @@ export function ChatWindow({
     return name || chat.companion?.email || `Chat #${chatId}`;
   })();
 
+  const pinnedIds = new Set(pins.map((p) => Number(p.messageId)));
+
+  function renderMessageText(textValue: string) {
+    const mention = `@${myId}`;
+    if (!textValue || !mention) return textValue;
+
+    const parts = textValue.split(mention);
+    if (parts.length === 1) return textValue;
+    return parts.flatMap((part, idx) =>
+      idx < parts.length - 1
+        ? [
+            part,
+            <span key={`m-${idx}`} className="bg-yellow-200 text-black px-1 rounded">
+              {mention}
+            </span>,
+          ]
+        : [part],
+    );
+  }
+
   const myMembership = details?.members?.find(
     (m: any) => Number(m.userId) === Number(myId),
   );
@@ -301,6 +337,33 @@ export function ChatWindow({
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
+        {chat?.isGroup && (
+          <div className="mb-2">
+            <div className="text-xs text-gray-500 mb-1">Закрепления</div>
+            {pinsLoading && <div className="text-xs text-gray-400">Загрузка…</div>}
+            {!pinsLoading && pins.length === 0 && (
+              <div className="text-xs text-gray-400">Нет закреплённых сообщений</div>
+            )}
+            {!pinsLoading && pins.length > 0 && (
+              <div className="space-y-1">
+                {pins.map((p) => {
+                  const m = p.message;
+                  const author =
+                    m?.author?.profile?.firstName || m?.author?.email || `User ${m?.author?.id}`;
+                  return (
+                    <div key={p.id} className="text-xs border rounded px-2 py-1">
+                      <div className="text-gray-600">{author}</div>
+                      <div className="truncate">
+                        {m?.deletedAt ? "Сообщение удалено" : m?.text}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {nextCursor && (
           <button onClick={loadMore} className="text-sm underline text-gray-600">
             Load more
@@ -351,7 +414,7 @@ export function ChatWindow({
                 )}
 
                 <div className={isDeleted ? "text-gray-500 italic" : ""}>
-                  {isDeleted ? "Сообщение удалено" : m.text}
+                  {isDeleted ? "Сообщение удалено" : renderMessageText(m.text || "")}
                 </div>
 
                 <div className={`text-[10px] mt-1 flex items-center gap-2 ${isMine ? "text-gray-300" : "text-gray-600"}`}>
@@ -375,6 +438,25 @@ export function ChatWindow({
                       }}
                     >
                       Ответить
+                    </button>
+                  )}
+
+                  {chat?.isGroup && showActions && (
+                    <button
+                      className="underline"
+                      onClick={async () => {
+                        if (pinnedIds.has(m.id)) {
+                          await unpinChatMessage(chatId, m.id);
+                        } else {
+                          await pinChatMessage(chatId, m.id);
+                        }
+                        try {
+                          setPins(await getChatPins(chatId));
+                        } catch {
+                        }
+                      }}
+                    >
+                      {pinnedIds.has(m.id) ? "Открепить" : "Закрепить"}
                     </button>
                   )}
 

@@ -24,6 +24,12 @@ export class MessagesService {
     return this.prisma.$transaction(async (tx) => {
       await this.ensureMember(userId, chatId);
 
+      const chat = await tx.chat.findUnique({
+        where: { id: chatId },
+        select: { id: true, isGroup: true },
+      });
+      if (!chat) throw new NotFoundException('Chat not found');
+
       if (dto.replyToId) {
         const exists = await tx.message.findUnique({
           where: { id: dto.replyToId },
@@ -32,6 +38,28 @@ export class MessagesService {
         if (!exists || exists.chatId !== chatId) {
           throw new NotFoundException('Reply message not found');
         }
+      }
+
+      const mentionIds: number[] = [];
+      if (chat.isGroup && dto.text) {
+        const re = /@(\d+)/g;
+        let match: RegExpExecArray | null;
+        while ((match = re.exec(dto.text)) !== null) {
+          const id = Number(match[1]);
+          if (Number.isInteger(id) && id > 0) mentionIds.push(id);
+        }
+      }
+      const uniqueMentionIds = Array.from(new Set(mentionIds));
+
+      if (uniqueMentionIds.length > 0) {
+        const members = await tx.chatMember.findMany({
+          where: { chatId, userId: { in: uniqueMentionIds } },
+          select: { userId: true },
+        });
+        const memberSet = new Set(members.map((m) => m.userId));
+        const filtered = uniqueMentionIds.filter((id) => memberSet.has(id));
+        uniqueMentionIds.length = 0;
+        uniqueMentionIds.push(...filtered);
       }
 
       const msg = await tx.message.create({
@@ -76,6 +104,16 @@ export class MessagesService {
         where: { id: chatId },
         data: { updatedAt: new Date() },
       });
+
+      if (uniqueMentionIds.length > 0) {
+        await tx.messageMention.createMany({
+          data: uniqueMentionIds.map((uid) => ({
+            chatId,
+            messageId: msg.id,
+            userId: uid,
+          })),
+        });
+      }
 
       this.chatGateway.emitNewMessage(chatId, msg);
       return msg;

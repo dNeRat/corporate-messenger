@@ -50,3 +50,18 @@ export async function setChatMemberRole(
   const res = await api.patch(`/chats/${chatId}/members/${userId}/role`, { role });
   return res.data as { userId: number; role: string };
 }
+
+export async function getChatPins(chatId: number) {
+  const res = await api.get(`/chats/${chatId}/pins`);
+  return res.data as any[];
+}
+
+export async function pinChatMessage(chatId: number, messageId: number) {
+  const res = await api.post(`/chats/${chatId}/pins/${messageId}`);
+  return res.data;
+}
+
+export async function unpinChatMessage(chatId: number, messageId: number) {
+  const res = await api.delete(`/chats/${chatId}/pins/${messageId}`);
+  return res.data;
+}

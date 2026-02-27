@@ -19,10 +19,12 @@ model User {
   role         Role     @default(USER)
   createdAt    DateTime @default(now())
 
-  memberships ChatMember[]
-  messages    Message[]
-  profile     Profile?
-  chatReads   ChatRead[]
+  memberships     ChatMember[]
+  messages        Message[]
+  profile         Profile?
+  chatReads       ChatRead[]
+  messagePins     MessagePin[]
+  messageMentions MessageMention[]
 }
 
 model Profile {
@@ -44,9 +46,11 @@ model Chat {
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  members   ChatMember[]
-  messages  Message[]
-  chatReads ChatRead[]
+  members         ChatMember[]
+  messages        Message[]
+  chatReads       ChatRead[]
+  messagePins     MessagePin[]
+  messageMentions MessageMention[]
 }
 
 model ChatMember {
@@ -63,21 +67,53 @@ model ChatMember {
 }
 
 model Message {
-  id        Int      @id @default(autoincrement())
+  id        Int       @id @default(autoincrement())
   chatId    Int
   authorId  Int
   text      String
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   editedAt  DateTime?
   deletedAt DateTime?
   replyToId Int?
 
-  chat   Chat @relation(fields: [chatId], references: [id])
-  author User @relation(fields: [authorId], references: [id])
-  replyTo Message? @relation("MessageReplies", fields: [replyToId], references: [id])
-  replies Message[] @relation("MessageReplies")
+  chat     Chat             @relation(fields: [chatId], references: [id])
+  author   User             @relation(fields: [authorId], references: [id])
+  replyTo  Message?         @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies  Message[]        @relation("MessageReplies")
+  pins     MessagePin[]
+  mentions MessageMention[]
 
   @@index([chatId, createdAt])
+}
+
+model MessagePin {
+  id         Int      @id @default(autoincrement())
+  chatId     Int
+  messageId  Int
+  pinnedById Int
+  createdAt  DateTime @default(now())
+
+  chat     Chat    @relation(fields: [chatId], references: [id])
+  message  Message @relation(fields: [messageId], references: [id])
+  pinnedBy User    @relation(fields: [pinnedById], references: [id])
+
+  @@unique([chatId, messageId])
+  @@index([chatId])
+}
+
+model MessageMention {
+  id        Int      @id @default(autoincrement())
+  chatId    Int
+  messageId Int
+  userId    Int
+  createdAt DateTime @default(now())
+
+  chat    Chat    @relation(fields: [chatId], references: [id])
+  message Message @relation(fields: [messageId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([chatId, userId])
+  @@index([messageId])
 }
 
 model ChatRead {
