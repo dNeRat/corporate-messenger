@@ -617,7 +617,7 @@ export function ChatWindow({
                   max-w-xs px-4 py-2 rounded-2xl shadow
                   ${
                     isMine
-                      ? "bg-emerald-500 text-zinc-950 rounded-br-sm"
+                      ? "bg-emerald-700 text-emerald-50 rounded-br-sm"
                       : "bg-zinc-800 text-zinc-100 rounded-bl-sm"
                   }
                 `}
@@ -647,7 +647,7 @@ export function ChatWindow({
                   {isDeleted ? "Сообщение удалено" : renderMessageText(m.text || "")}
                 </div>
 
-                <div className={`text-[10px] mt-1 flex items-center gap-2 ${isMine ? "text-emerald-100/70" : "text-zinc-400"}`}>
+                <div className={`text-[10px] mt-1 flex items-center gap-2 ${isMine ? "text-emerald-100/90" : "text-zinc-400"}`}>
                   <span>{new Date(m.createdAt).toLocaleTimeString()}</span>
                   {m.editedAt && !isDeleted && <span>ред.</span>}
 
@@ -658,10 +658,14 @@ export function ChatWindow({
                   )}
                 </div>
 
-                <div className="mt-1 flex gap-2 text-[10px] text-zinc-400">
+                <div
+                  className={`mt-1 flex gap-2 text-[10px] ${
+                    isMine ? "text-emerald-100/90" : "text-zinc-400"
+                  }`}
+                >
                   {showActions && (
                     <button
-                      className="underline hover:text-zinc-200"
+                      className={isMine ? "underline hover:text-emerald-50" : "underline hover:text-zinc-200"}
                       onClick={() => {
                         setReplyTo(m);
                         inputRef.current?.focus();
@@ -673,7 +677,7 @@ export function ChatWindow({
 
                   {chat?.isGroup && showActions && (
                     <button
-                      className="underline hover:text-zinc-200"
+                      className={isMine ? "underline hover:text-emerald-50" : "underline hover:text-zinc-200"}
                       onClick={async () => {
                         if (pinnedIds.has(m.id)) {
                           await unpinChatMessage(chatId, m.id);
@@ -693,7 +697,7 @@ export function ChatWindow({
                   {isMine && showActions && (
                     <>
                       <button
-                        className="underline hover:text-zinc-200"
+                        className="underline hover:text-emerald-50"
                         onClick={() => {
                           setEditingId(m.id);
                           setEditText(m.text || "");
@@ -704,7 +708,7 @@ export function ChatWindow({
                         Ред.
                       </button>
                       <button
-                        className="underline text-rose-400 hover:text-rose-300"
+                        className="underline text-rose-200 hover:text-rose-100"
                         onClick={async () => {
                           await deleteMessage(chatId, m.id);
                         }}
