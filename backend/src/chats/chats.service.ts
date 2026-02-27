@@ -309,11 +309,13 @@ export class ChatsService {
     });
     if (!msg || msg.chatId !== chatId) throw new NotFoundException('Message not found');
 
-    return this.prisma.messagePin.upsert({
-      where: { chatId_messageId: { chatId, messageId } },
-      update: {},
-      create: { chatId, messageId, pinnedById: currentUserId },
-      select: { id: true, messageId: true },
+    return this.prisma.$transaction(async (tx) => {
+      await tx.messagePin.deleteMany({ where: { chatId } });
+
+      return tx.messagePin.create({
+        data: { chatId, messageId, pinnedById: currentUserId },
+        select: { id: true, messageId: true },
+      });
     });
   }
 

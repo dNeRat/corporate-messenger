@@ -55,6 +55,7 @@ export function ChatWindow({
   const [mutatingMember, setMutatingMember] = useState(false);
   const [pins, setPins] = useState<any[]>([]);
   const [pinsLoading, setPinsLoading] = useState(false);
+  const [pinsOpen, setPinsOpen] = useState(true);
 
   const myId = Number(me?.sub ?? me?.id);
 
@@ -336,33 +337,44 @@ export function ChatWindow({
         <div className="text-xs text-gray-500 shrink-0">#{chatId}</div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
-        {chat?.isGroup && (
-          <div className="mb-2">
-            <div className="text-xs text-gray-500 mb-1">Закрепления</div>
-            {pinsLoading && <div className="text-xs text-gray-400">Загрузка…</div>}
-            {!pinsLoading && pins.length === 0 && (
-              <div className="text-xs text-gray-400">Нет закреплённых сообщений</div>
-            )}
-            {!pinsLoading && pins.length > 0 && (
-              <div className="space-y-1">
-                {pins.map((p) => {
-                  const m = p.message;
-                  const author =
-                    m?.author?.profile?.firstName || m?.author?.email || `User ${m?.author?.id}`;
-                  return (
-                    <div key={p.id} className="text-xs border rounded px-2 py-1">
-                      <div className="text-gray-600">{author}</div>
-                      <div className="truncate">
-                        {m?.deletedAt ? "Сообщение удалено" : m?.text}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+      {chat?.isGroup && (
+        <div className="px-3 py-2 border-b bg-white">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-xs text-gray-500">
+              Закрепления{pins.length > 0 ? ` (${pins.length})` : ""}
+            </div>
+            <button
+              className="text-xs underline text-gray-600"
+              onClick={() => setPinsOpen((v) => !v)}
+            >
+              {pinsOpen ? "Свернуть" : "Развернуть"}
+            </button>
           </div>
-        )}
+          {pinsLoading && <div className="text-xs text-gray-400">Загрузка…</div>}
+          {pinsOpen && !pinsLoading && pins.length === 0 && (
+            <div className="text-xs text-gray-400">Нет закреплённых сообщений</div>
+          )}
+          {pinsOpen && !pinsLoading && pins.length > 0 && (
+            <div className="space-y-1 max-h-28 overflow-auto">
+              {pins.map((p) => {
+                const m = p.message;
+                const author =
+                  m?.author?.profile?.firstName || m?.author?.email || `User ${m?.author?.id}`;
+                return (
+                  <div key={p.id} className="text-xs border rounded px-2 py-1">
+                    <div className="text-gray-600">{author}</div>
+                    <div className="truncate">
+                      {m?.deletedAt ? "Сообщение удалено" : m?.text}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
 
         {nextCursor && (
           <button onClick={loadMore} className="text-sm underline text-gray-600">
