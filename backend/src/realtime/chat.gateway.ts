@@ -146,4 +146,12 @@ async handleMarkRead(@MessageBody() data: { chatId: number }, @ConnectedSocket()
   emitNewMessage(chatId: number, payload: any) {
     this.server.to(`chat:${chatId}`).emit('new_message', payload);
   }
+
+  emitMessageUpdated(chatId: number, payload: any) {
+    this.server.to(`chat:${chatId}`).emit('message_updated', payload);
+  }
+
+  emitMessageDeleted(chatId: number, payload: any) {
+    this.server.to(`chat:${chatId}`).emit('message_deleted', payload);
+  }
 }

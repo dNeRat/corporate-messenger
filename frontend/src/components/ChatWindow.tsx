@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getMessages, sendMessage } from "@/lib/messages";
+import { deleteMessage, editMessage, getMessages, sendMessage } from "@/lib/messages";
 import { getSocket } from "@/lib/socket";
 import { api } from "@/lib/axios";
 import type { Chat } from "@/lib/types";
@@ -29,8 +29,12 @@ export function ChatWindow({
   const [items, setItems] = useState<any[]>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [text, setText] = useState("");
+  const [replyTo, setReplyTo] = useState<any | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const [typingUsers, setTypingUsers] = useState<Map<number, string>>(new Map());
   const typingTimerRef = useRef<any>(null);
@@ -67,6 +71,9 @@ export function ChatWindow({
     setTypingUsers(new Map());
     setReadMap({});
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    setReplyTo(null);
+    setEditingId(null);
+    setEditText("");
 
     (async () => {
       const page = await getMessages(chatId, undefined, 30);
@@ -161,10 +168,26 @@ export function ChatWindow({
       setReadMap((prev) => ({ ...prev, [uid]: String(p.lastReadAt) }));
     };
 
+    const onMessageUpdated = (payload: any) => {
+      if (Number(payload.chatId) !== Number(chatId)) return;
+      setItems((prev) =>
+        prev.map((m) => (m.id === payload.id ? { ...m, ...payload } : m)),
+      );
+    };
+
+    const onMessageDeleted = (payload: any) => {
+      if (Number(payload.chatId) !== Number(chatId)) return;
+      setItems((prev) =>
+        prev.map((m) => (m.id === payload.id ? { ...m, ...payload } : m)),
+      );
+    };
+
     socket.on("new_message", onNew);
     socket.on("typing", onTyping);
     socket.on("stop_typing", onStopTyping);
     socket.on("read_receipt", onReadReceipt);
+    socket.on("message_updated", onMessageUpdated);
+    socket.on("message_deleted", onMessageDeleted);
 
     return () => {
       alive = false;
@@ -180,20 +203,30 @@ export function ChatWindow({
       socket.off("typing", onTyping);
       socket.off("stop_typing", onStopTyping);
       socket.off("read_receipt", onReadReceipt);
+      socket.off("message_updated", onMessageUpdated);
+      socket.off("message_deleted", onMessageDeleted);
     };
   }, [chatId, myId, onConsumedFirstUnread]);
 
   async function onSend(e: React.FormEvent) {
     e.preventDefault();
-    const t = text.trim();
+    const t = (editingId ? editText : text).trim();
     if (!t) return;
 
-    setText("");
+    if (editingId) {
+      const updated = await editMessage(chatId, editingId, t);
+      setItems((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+      setEditingId(null);
+      setEditText("");
+    } else {
+      setText("");
 
-    const msg = await sendMessage(chatId, t);
+      const msg = await sendMessage(chatId, t, replyTo?.id);
 
-    // fallback, если WS задержится
-    setItems((prev) => (prev.some((x) => x.id === msg.id) ? prev : [...prev, msg]));
+      // fallback, если WS задержится
+      setItems((prev) => (prev.some((x) => x.id === msg.id) ? prev : [...prev, msg]));
+      setReplyTo(null);
+    }
 
     getSocket().emit("stop_typing", { chatId });
 
@@ -277,6 +310,8 @@ export function ChatWindow({
         {items.map((m) => {
           const authorId = Number(m.authorId ?? m.userId ?? m.senderId ?? m.author?.id);
           const isMine = authorId === myId;
+          const isDeleted = !!m.deletedAt;
+          const showActions = !isDeleted;
 
           return (
             <div
@@ -294,21 +329,77 @@ export function ChatWindow({
                   }
                 `}
               >
+                {m.replyTo && (
+                  <div
+                    className={`mb-2 px-2 py-1 rounded text-xs ${
+                      isMine ? "bg-white/20" : "bg-black/10"
+                    }`}
+                  >
+                    <div className="font-semibold">
+                      {m.replyTo.author?.profile?.firstName ||
+                        m.replyTo.author?.email ||
+                        "Сообщение"}
+                    </div>
+                    <div className="truncate">{m.replyTo.text || "Удалено"}</div>
+                  </div>
+                )}
+
                 {!isMine && (
                   <div className="text-xs font-semibold mb-1">
                     {m.author?.profile?.firstName || m.author?.email || "Unknown"}
                   </div>
                 )}
 
-                <div>{m.text}</div>
+                <div className={isDeleted ? "text-gray-500 italic" : ""}>
+                  {isDeleted ? "Сообщение удалено" : m.text}
+                </div>
 
                 <div className={`text-[10px] mt-1 flex items-center gap-2 ${isMine ? "text-gray-300" : "text-gray-600"}`}>
                   <span>{new Date(m.createdAt).toLocaleTimeString()}</span>
+                  {m.editedAt && !isDeleted && <span>ред.</span>}
 
                   {isMine && (
                     <span>
                       {isReadBySomeoneElse(m.createdAt) ? "✓✓" : "✓"}
                     </span>
+                  )}
+                </div>
+
+                <div className="mt-1 flex gap-2 text-[10px]">
+                  {showActions && (
+                    <button
+                      className="underline"
+                      onClick={() => {
+                        setReplyTo(m);
+                        inputRef.current?.focus();
+                      }}
+                    >
+                      Ответить
+                    </button>
+                  )}
+
+                  {isMine && showActions && (
+                    <>
+                      <button
+                        className="underline"
+                        onClick={() => {
+                          setEditingId(m.id);
+                          setEditText(m.text || "");
+                          setReplyTo(null);
+                          inputRef.current?.focus();
+                        }}
+                      >
+                        Ред.
+                      </button>
+                      <button
+                        className="underline text-red-600"
+                        onClick={async () => {
+                          await deleteMessage(chatId, m.id);
+                        }}
+                      >
+                        Удалить
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -328,24 +419,54 @@ export function ChatWindow({
       )}
 
       <form onSubmit={onSend} className="p-3 border-t flex gap-2 shrink-0">
-        <input
-          className="border rounded p-2 flex-1"
-          placeholder="Написать сообщение..."
-          value={text}
-          onChange={(e) => {
-            const v = e.target.value;
-            setText(v);
+        <div className="flex-1 flex flex-col gap-2">
+          {(replyTo || editingId) && (
+            <div className="text-xs bg-gray-100 rounded px-2 py-1 flex items-center justify-between">
+              <div className="truncate">
+                {editingId
+                  ? "Редактирование сообщения"
+                  : `Ответ на: ${
+                      replyTo?.author?.profile?.firstName ||
+                      replyTo?.author?.email ||
+                      "сообщение"
+                    }`}
+              </div>
+              <button
+                className="underline"
+                onClick={() => {
+                  setReplyTo(null);
+                  setEditingId(null);
+                  setEditText("");
+                }}
+              >
+                Отменить
+              </button>
+            </div>
+          )}
 
-            const socket = getSocket();
-            socket.emit("typing", { chatId });
+          <input
+            ref={inputRef}
+            className="border rounded p-2 flex-1"
+            placeholder="Написать сообщение..."
+            value={editingId ? editText : text}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (editingId) setEditText(v);
+              else setText(v);
 
-            if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-            typingTimerRef.current = setTimeout(() => {
-              socket.emit("stop_typing", { chatId });
-            }, 800);
-          }}
-        />
-        <button className="bg-black text-white rounded px-4">Send</button>
+              const socket = getSocket();
+              socket.emit("typing", { chatId });
+
+              if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+              typingTimerRef.current = setTimeout(() => {
+                socket.emit("stop_typing", { chatId });
+              }, 800);
+            }}
+          />
+        </div>
+        <button className="bg-black text-white rounded px-4">
+          {editingId ? "Сохранить" : "Send"}
+        </button>
       </form>
 
       {detailsOpen && (

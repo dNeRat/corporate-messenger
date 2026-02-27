@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Req, UseGuards, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Req, UseGuards, Query } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { MessagesService } from './messages.service';
 import { CreateMessageDto } from './dto/create-message.dto';
+import { UpdateMessageDto } from './dto/update-message.dto';
 
 
 @Controller('chats/:id/messages')
@@ -12,6 +13,25 @@ export class MessagesController {
   @Post()
   send(@Req() req: any, @Param('id', ParseIntPipe) chatId: number, @Body() dto: CreateMessageDto) {
     return this.messagesService.sendMessage(req.user.sub, chatId, dto);
+  }
+
+  @Patch(':messageId')
+  edit(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) chatId: number,
+    @Param('messageId', ParseIntPipe) messageId: number,
+    @Body() dto: UpdateMessageDto,
+  ) {
+    return this.messagesService.editMessage(req.user.sub, chatId, messageId, dto);
+  }
+
+  @Delete(':messageId')
+  remove(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) chatId: number,
+    @Param('messageId', ParseIntPipe) messageId: number,
+  ) {
+    return this.messagesService.deleteMessage(req.user.sub, chatId, messageId);
   }
 
   @Get()
