@@ -21,7 +21,7 @@ export function ChatList({
   unread: Record<number, { count: number; firstId: number }>;
 }) {
   return (
-    <div className="h-full overflow-auto border-r">
+    <div className="h-full overflow-auto border-r border-zinc-800 bg-zinc-950">
       {chats.map((chat) => {
         const active = chat.id === selectedChatId;
         const last = chat.messages?.[0]?.text ?? "";
@@ -32,21 +32,21 @@ export function ChatList({
             key={chat.id}
             onClick={() => onSelect(chat.id)}
             className={[
-              "w-full text-left p-3 border-b hover:bg-gray-50",
-              active ? "bg-gray-100" : "",
+              "w-full text-left p-3 border-b border-zinc-800 hover:bg-zinc-900",
+              active ? "bg-zinc-900" : "",
             ].join(" ")}
           >
             <div className="flex items-center justify-between gap-2">
               <div className="font-semibold truncate">{chatTitle(chat)}</div>
 
               {badge > 0 && (
-                <div className="min-w-6 h-6 px-2 rounded-full bg-black text-white text-xs flex items-center justify-center">
+                <div className="min-w-6 h-6 px-2 rounded-full bg-emerald-500 text-zinc-950 text-xs flex items-center justify-center">
                   {badge}
                 </div>
               )}
             </div>
 
-            <div className="text-sm text-gray-600 truncate">{last}</div>
+            <div className="text-sm text-zinc-400 truncate">{last}</div>
           </button>
         );
       })}

@@ -48,6 +48,7 @@ export class ChatGateway
 
     const payload = this.jwtService.verify(token);
     socket.data.userId = payload.sub;
+    socket.join(`user:${payload.sub}`);
 
     console.log('WS connected user:', payload.sub);
   } catch (error: any) {
@@ -153,5 +154,9 @@ async handleMarkRead(@MessageBody() data: { chatId: number }, @ConnectedSocket()
 
   emitMessageDeleted(chatId: number, payload: any) {
     this.server.to(`chat:${chatId}`).emit('message_deleted', payload);
+  }
+
+  emitMention(userId: number, payload: any) {
+    this.server.to(`user:${userId}`).emit('mention_created', payload);
   }
 }

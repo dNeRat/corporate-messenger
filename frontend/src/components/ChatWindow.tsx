@@ -21,16 +21,21 @@ export function ChatWindow({
   chat,
   me,
   firstUnreadId,
+  scrollToMessageId,
   onConsumedFirstUnread,
+  onConsumedScrollToMessage,
 }: {
   chatId: number;
   chat: Chat | null;
   me: any;
   firstUnreadId: number | null;
+  scrollToMessageId: number | null;
   onConsumedFirstUnread: () => void;
+  onConsumedScrollToMessage: () => void;
 }) {
   const [items, setItems] = useState<any[]>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [initialLoaded, setInitialLoaded] = useState(false);
   const [text, setText] = useState("");
   const [replyTo, setReplyTo] = useState<any | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -61,6 +66,14 @@ export function ChatWindow({
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionStart, setMentionStart] = useState<number | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const itemsRef = useRef<any[]>([]);
+  const nextCursorRef = useRef<number | null>(null);
+  const initialLoadedRef = useRef(false);
+  const onConsumedFirstUnreadRef = useRef(onConsumedFirstUnread);
+  const suppressAutoScrollRef = useRef(false);
+  const suppressAutoScrollUntilRef = useRef<number>(0);
+  const chatIdRef = useRef(chatId);
+  const jumpLockRef = useRef(false);
 
   const myId = Number(me?.sub ?? me?.id);
 
@@ -77,10 +90,60 @@ export function ChatWindow({
   }
 
   useEffect(() => {
-    let alive = true;
+    itemsRef.current = items;
+  }, [items]);
 
+  useEffect(() => {
+    nextCursorRef.current = nextCursor;
+  }, [nextCursor]);
+
+  useEffect(() => {
+    initialLoadedRef.current = initialLoaded;
+  }, [initialLoaded]);
+
+  useEffect(() => {
+    onConsumedFirstUnreadRef.current = onConsumedFirstUnread;
+  }, [onConsumedFirstUnread]);
+
+  useEffect(() => {
+    chatIdRef.current = chatId;
+  }, [chatId]);
+
+  useEffect(() => {
+    if (scrollToMessageId) {
+      pendingFirstUnreadRef.current = null;
+      suppressAutoScrollRef.current = true;
+      suppressAutoScrollUntilRef.current = Date.now() + 2000;
+    }
+  }, [scrollToMessageId]);
+
+  function canAutoScroll() {
+    if (suppressAutoScrollRef.current) {
+      if (Date.now() > suppressAutoScrollUntilRef.current) {
+        suppressAutoScrollRef.current = false;
+        return true;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  useEffect(() => {
+    let alive = true;
+    const skipInitialAutoScroll = !!scrollToMessageId;
+
+    if (scrollToMessageId) {
+      suppressAutoScrollRef.current = true;
+      suppressAutoScrollUntilRef.current = Date.now() + 2000;
+    }
     setTypingUsers(new Map());
     setReadMap({});
+    setItems([]);
+    setNextCursor(null);
+    setInitialLoaded(false);
+    itemsRef.current = [];
+    nextCursorRef.current = null;
+    initialLoadedRef.current = false;
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     setReplyTo(null);
     setEditingId(null);
@@ -94,6 +157,7 @@ export function ChatWindow({
 
       setItems(page.items.reverse());
       setNextCursor(page.nextCursor);
+      setInitialLoaded(true);
       try {
         const rr = await api.get(`/chats/${chatId}/read`);
         const map: Record<number, string> = {};
@@ -112,8 +176,8 @@ export function ChatWindow({
           }
           // consume pending unread (важно!)
           pendingFirstUnreadRef.current = null;
-          onConsumedFirstUnread();
-        } else {
+          onConsumedFirstUnreadRef.current();
+        } else if (!skipInitialAutoScroll && canAutoScroll()) {
           scrollToBottom(false);
         }
         try {
@@ -169,7 +233,7 @@ export function ChatWindow({
       setItems((prev) => (prev.some((x) => x.id === payload.id) ? prev : [...prev, payload]));
 
       // автоскроллим вниз только если не висим на первом непрочитанном
-      if (!pendingFirstUnreadRef.current) {
+      if (!pendingFirstUnreadRef.current && !skipInitialAutoScroll && canAutoScroll()) {
         setTimeout(() => scrollToBottom(true), 10);
       }
     };
@@ -242,7 +306,59 @@ export function ChatWindow({
       socket.off("message_updated", onMessageUpdated);
       socket.off("message_deleted", onMessageDeleted);
     };
-  }, [chatId, myId, onConsumedFirstUnread]);
+  }, [chatId, myId]);
+
+  async function jumpToMessage(targetId: number) {
+    const startChatId = chatId;
+    suppressAutoScrollRef.current = true;
+    suppressAutoScrollUntilRef.current = Date.now() + 2000;
+    if (jumpLockRef.current) return;
+    jumpLockRef.current = true;
+
+    try {
+      let wait = 0;
+      while (!initialLoadedRef.current && wait < 50) {
+        await new Promise((r) => setTimeout(r, 100));
+        if (chatIdRef.current !== startChatId) return;
+        wait += 1;
+      }
+
+      let currentItems = itemsRef.current;
+      let cursor = nextCursorRef.current;
+
+      if (!currentItems.some((m) => m.id === targetId)) {
+        let safety = 0;
+        while (cursor && safety < 50) {
+          const page = await getMessages(startChatId, cursor, 30);
+          if (chatIdRef.current !== startChatId) return;
+          currentItems = [...page.items.reverse(), ...currentItems];
+          cursor = page.nextCursor;
+          if (currentItems.some((m) => m.id === targetId)) break;
+          safety += 1;
+        }
+      }
+
+      if (chatIdRef.current !== startChatId) return;
+
+      if (currentItems !== itemsRef.current) {
+        setItems(currentItems);
+        setNextCursor(cursor ?? null);
+      }
+
+      setTimeout(() => {
+        if (chatIdRef.current !== startChatId) return;
+        const el = document.getElementById(`msg-${targetId}`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 50);
+    } finally {
+      jumpLockRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (!scrollToMessageId) return;
+    jumpToMessage(scrollToMessageId).finally(() => onConsumedScrollToMessage());
+  }, [scrollToMessageId, chatId, onConsumedScrollToMessage]);
 
   async function onSend(e: React.FormEvent) {
     e.preventDefault();
@@ -324,7 +440,7 @@ export function ChatWindow({
       nodes.push(
         <span
           key={`${start}-${end}`}
-          className={isMe ? "bg-yellow-200 text-black px-1 rounded" : "text-blue-700"}
+          className={isMe ? "bg-amber-300 text-zinc-900 px-1 rounded" : "text-emerald-300"}
         >
           {label}
         </span>,
@@ -423,32 +539,32 @@ export function ChatWindow({
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="p-3 border-b shrink-0 flex items-center justify-between gap-3">
+      <div className="p-3 border-b border-zinc-800 shrink-0 flex items-center justify-between gap-3">
         <button
-          className="font-semibold truncate text-left hover:underline"
+          className="font-semibold truncate text-left hover:underline text-zinc-100"
           onClick={() => setDetailsOpen(true)}
         >
           {headerTitle}
         </button>
-        <div className="text-xs text-gray-500 shrink-0">#{chatId}</div>
+        <div className="text-xs text-zinc-500 shrink-0">#{chatId}</div>
       </div>
 
       {chat?.isGroup && (pinsOpen || pins.length > 0 || pinsLoading) && (
-        <div className="px-3 py-2 border-b bg-white">
+        <div className="px-3 py-2 border-b border-zinc-800 bg-zinc-900">
           <div className="flex items-center justify-between mb-1">
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-zinc-400">
               Закрепления{pins.length > 0 ? ` (${pins.length})` : ""}
             </div>
             <button
-              className="text-xs underline text-gray-600"
+              className="text-xs underline text-zinc-400 hover:text-zinc-200"
               onClick={() => setPinsOpen((v) => !v)}
             >
               {pinsOpen ? "Свернуть" : "Развернуть"}
             </button>
           </div>
-          {pinsLoading && <div className="text-xs text-gray-400">Загрузка…</div>}
+          {pinsLoading && <div className="text-xs text-zinc-500">Загрузка…</div>}
           {pinsOpen && !pinsLoading && pins.length === 0 && (
-            <div className="text-xs text-gray-400">Нет закреплённых сообщений</div>
+            <div className="text-xs text-zinc-500">Нет закреплённых сообщений</div>
           )}
           {pinsOpen && !pinsLoading && pins.length > 0 && (
             <div className="space-y-1 max-h-28 overflow-auto">
@@ -459,15 +575,12 @@ export function ChatWindow({
                 return (
                   <button
                     key={p.id}
-                    className="text-xs border rounded px-2 py-1 text-left w-full hover:bg-gray-50"
+                    className="text-xs border border-zinc-700 rounded px-2 py-1 text-left w-full hover:bg-zinc-800"
                     onClick={() => {
-                      const el = document.getElementById(`msg-${p.messageId}`);
-                      if (el) {
-                        el.scrollIntoView({ behavior: "smooth", block: "center" });
-                      }
+                      jumpToMessage(p.messageId);
                     }}
                   >
-                    <div className="text-gray-600">{author}</div>
+                    <div className="text-zinc-400">{author}</div>
                     <div className="truncate">
                       {m?.deletedAt ? "Сообщение удалено" : m?.text}
                     </div>
@@ -482,7 +595,7 @@ export function ChatWindow({
       <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
 
         {nextCursor && (
-          <button onClick={loadMore} className="text-sm underline text-gray-600">
+          <button onClick={loadMore} className="text-sm underline text-zinc-400">
             Load more
           </button>
         )}
@@ -504,15 +617,15 @@ export function ChatWindow({
                   max-w-xs px-4 py-2 rounded-2xl shadow
                   ${
                     isMine
-                      ? "bg-black text-white rounded-br-sm"
-                      : "bg-gray-200 text-black rounded-bl-sm"
+                      ? "bg-emerald-500 text-zinc-950 rounded-br-sm"
+                      : "bg-zinc-800 text-zinc-100 rounded-bl-sm"
                   }
                 `}
               >
                 {m.replyTo && (
                   <div
                     className={`mb-2 px-2 py-1 rounded text-xs ${
-                      isMine ? "bg-white/20" : "bg-black/10"
+                      isMine ? "bg-emerald-200/20" : "bg-zinc-700/60"
                     }`}
                   >
                     <div className="font-semibold">
@@ -530,11 +643,11 @@ export function ChatWindow({
                   </div>
                 )}
 
-                <div className={isDeleted ? "text-gray-500 italic" : ""}>
+                <div className={isDeleted ? "text-zinc-500 italic" : ""}>
                   {isDeleted ? "Сообщение удалено" : renderMessageText(m.text || "")}
                 </div>
 
-                <div className={`text-[10px] mt-1 flex items-center gap-2 ${isMine ? "text-gray-300" : "text-gray-600"}`}>
+                <div className={`text-[10px] mt-1 flex items-center gap-2 ${isMine ? "text-emerald-100/70" : "text-zinc-400"}`}>
                   <span>{new Date(m.createdAt).toLocaleTimeString()}</span>
                   {m.editedAt && !isDeleted && <span>ред.</span>}
 
@@ -545,10 +658,10 @@ export function ChatWindow({
                   )}
                 </div>
 
-                <div className="mt-1 flex gap-2 text-[10px]">
+                <div className="mt-1 flex gap-2 text-[10px] text-zinc-400">
                   {showActions && (
                     <button
-                      className="underline"
+                      className="underline hover:text-zinc-200"
                       onClick={() => {
                         setReplyTo(m);
                         inputRef.current?.focus();
@@ -560,7 +673,7 @@ export function ChatWindow({
 
                   {chat?.isGroup && showActions && (
                     <button
-                      className="underline"
+                      className="underline hover:text-zinc-200"
                       onClick={async () => {
                         if (pinnedIds.has(m.id)) {
                           await unpinChatMessage(chatId, m.id);
@@ -580,7 +693,7 @@ export function ChatWindow({
                   {isMine && showActions && (
                     <>
                       <button
-                        className="underline"
+                        className="underline hover:text-zinc-200"
                         onClick={() => {
                           setEditingId(m.id);
                           setEditText(m.text || "");
@@ -591,7 +704,7 @@ export function ChatWindow({
                         Ред.
                       </button>
                       <button
-                        className="underline text-red-600"
+                        className="underline text-rose-400 hover:text-rose-300"
                         onClick={async () => {
                           await deleteMessage(chatId, m.id);
                         }}
@@ -610,17 +723,17 @@ export function ChatWindow({
       </div>
 
       {typingUsers.size > 0 && (
-        <div className="px-3 py-1 text-xs text-gray-500">
+        <div className="px-3 py-1 text-xs text-zinc-400">
           {typingUsers.size === 1
             ? `${Array.from(typingUsers.values())[0]} печатает…`
             : `${typingUsers.size} человека печатают…`}
         </div>
       )}
 
-      <form onSubmit={onSend} className="p-3 border-t flex gap-2 shrink-0">
+      <form onSubmit={onSend} className="p-3 border-t border-zinc-800 flex gap-2 shrink-0 bg-zinc-950">
         <div className="flex-1 flex flex-col gap-2">
           {(replyTo || editingId) && (
-            <div className="text-xs bg-gray-100 rounded px-2 py-1 flex items-center justify-between">
+            <div className="text-xs bg-zinc-900 border border-zinc-800 rounded px-2 py-1 flex items-center justify-between">
               <div className="truncate">
                 {editingId
                   ? "Редактирование сообщения"
@@ -631,7 +744,7 @@ export function ChatWindow({
                     }`}
               </div>
               <button
-                className="underline"
+                className="underline text-zinc-400 hover:text-zinc-200"
                 onClick={() => {
                   setReplyTo(null);
                   setEditingId(null);
@@ -646,7 +759,7 @@ export function ChatWindow({
           <div className="relative">
             <input
               ref={inputRef}
-              className="border rounded p-2 flex-1 w-full"
+              className="border border-zinc-700 bg-zinc-900 rounded p-2 flex-1 w-full text-zinc-100 placeholder:text-zinc-500"
               placeholder="Написать сообщение..."
               value={editingId ? editText : text}
               onChange={(e) => {
@@ -693,7 +806,7 @@ export function ChatWindow({
             />
 
             {chat?.isGroup && mentionOpen && mentionCandidates.length > 0 && (
-              <div className="absolute bottom-full mb-2 left-0 right-0 max-h-40 overflow-auto border rounded bg-white shadow">
+              <div className="absolute bottom-full mb-2 left-0 right-0 max-h-40 overflow-auto border border-zinc-700 rounded bg-zinc-900 shadow">
                 {mentionCandidates.map((m, idx) => {
                   const id = Number(m.userId ?? m.id);
                   const label = getMemberLabelById(id);
@@ -702,8 +815,8 @@ export function ChatWindow({
                       type="button"
                       key={id}
                       className={[
-                        "w-full text-left px-2 py-1 text-sm",
-                        idx === mentionIndex ? "bg-gray-100" : "hover:bg-gray-100",
+                        "w-full text-left px-2 py-1 text-sm text-zinc-100",
+                        idx === mentionIndex ? "bg-zinc-800" : "hover:bg-zinc-800",
                       ].join(" ")}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => applyMention(id)}
@@ -716,20 +829,20 @@ export function ChatWindow({
             )}
           </div>
         </div>
-        <button className="bg-black text-white rounded px-4">
+        <button className="bg-emerald-500 text-zinc-950 rounded px-4">
           {editingId ? "Сохранить" : "Send"}
         </button>
       </form>
 
       {detailsOpen && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-lg shadow-lg overflow-hidden">
-            <div className="p-4 border-b flex items-center justify-between">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 text-zinc-100 border border-zinc-800 w-full max-w-lg rounded-lg shadow-lg overflow-hidden">
+            <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
               <div className="font-semibold">
                 {chat?.isGroup ? "Настройки чата" : "Профиль пользователя"}
               </div>
               <button
-                className="text-sm underline"
+                className="text-sm underline text-zinc-400 hover:text-zinc-200"
                 onClick={() => setDetailsOpen(false)}
               >
                 Закрыть
@@ -738,7 +851,7 @@ export function ChatWindow({
 
             <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
               {detailsLoading && <div>Загрузка...</div>}
-              {detailsError && <div className="text-sm text-red-600">{detailsError}</div>}
+              {detailsError && <div className="text-sm text-rose-400">{detailsError}</div>}
 
               {!detailsLoading && details && !chat?.isGroup && (
                 (() => {
@@ -753,7 +866,7 @@ export function ChatWindow({
                         {name || other?.user?.email || `User #${other?.userId}`}
                       </div>
                       {other?.user?.email && (
-                        <div className="text-sm text-gray-600">{other.user.email}</div>
+                        <div className="text-sm text-zinc-400">{other.user.email}</div>
                       )}
                       {p?.position && <div className="text-sm">Должность: {p.position}</div>}
                       {p?.department && <div className="text-sm">Отдел: {p.department}</div>}
@@ -765,16 +878,16 @@ export function ChatWindow({
               {!detailsLoading && details && chat?.isGroup && (
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <div className="text-sm text-gray-600">Название</div>
+                    <div className="text-sm text-zinc-400">Название</div>
                     <div className="flex gap-2">
                       <input
-                        className="border rounded p-2 flex-1"
+                        className="border border-zinc-700 bg-zinc-950 rounded p-2 flex-1 text-zinc-100 placeholder:text-zinc-500"
                         value={editTitle}
                         onChange={(e) => setEditTitle(e.target.value)}
                         disabled={!canManageMembers}
                       />
                       <button
-                        className="bg-black text-white rounded px-3 text-sm disabled:opacity-60"
+                        className="bg-emerald-500 text-zinc-950 rounded px-3 text-sm disabled:opacity-60"
                         disabled={!canManageMembers || savingTitle}
                         onClick={async () => {
                           if (savingTitle) return;
@@ -797,7 +910,7 @@ export function ChatWindow({
                   </div>
 
                   <div className="space-y-2">
-                    <div className="text-sm text-gray-600">Участники</div>
+                    <div className="text-sm text-zinc-400">Участники</div>
                     <div className="space-y-2">
                       {details.members?.map((m: any) => {
                         const p = m.user?.profile || {};
@@ -814,7 +927,7 @@ export function ChatWindow({
                             <div className="flex-1 truncate">
                               <div className="text-sm font-medium">{label}</div>
                               {m.user?.email && (
-                                <div className="text-xs text-gray-600">
+                                <div className="text-xs text-zinc-400">
                                   {m.user.email}
                                 </div>
                               )}
@@ -822,7 +935,7 @@ export function ChatWindow({
 
                             {canSetRoles && !isOwner && (
                               <select
-                                className="border rounded px-2 py-1 text-sm"
+                                className="border border-zinc-700 bg-zinc-950 rounded px-2 py-1 text-sm text-zinc-100"
                                 value={String(m.role)}
                                 onChange={async (e) => {
                                   const role = e.target.value as "ADMIN" | "MEMBER";
@@ -843,12 +956,12 @@ export function ChatWindow({
                             )}
 
                             {!canSetRoles && (
-                              <div className="text-xs text-gray-500">{m.role}</div>
+                              <div className="text-xs text-zinc-400">{m.role}</div>
                             )}
 
                             {canRemove && (
                               <button
-                                className="text-xs underline text-red-600 disabled:opacity-60"
+                                className="text-xs underline text-rose-400 disabled:opacity-60 hover:text-rose-300"
                                 disabled={mutatingMember}
                                 onClick={async () => {
                                   if (mutatingMember) return;
@@ -877,16 +990,16 @@ export function ChatWindow({
 
                   {canManageMembers && (
                     <div className="space-y-2">
-                      <div className="text-sm text-gray-600">Добавить участника</div>
+                      <div className="text-sm text-zinc-400">Добавить участника</div>
                       <div className="flex gap-2">
                         <input
-                          className="border rounded p-2 flex-1"
+                          className="border border-zinc-700 bg-zinc-950 rounded p-2 flex-1 text-zinc-100 placeholder:text-zinc-500"
                           placeholder="User ID"
                           value={memberInput}
                           onChange={(e) => setMemberInput(e.target.value)}
                         />
                         <button
-                          className="bg-black text-white rounded px-3 text-sm disabled:opacity-60"
+                          className="bg-emerald-500 text-zinc-950 rounded px-3 text-sm disabled:opacity-60"
                           disabled={mutatingMember}
                           onClick={async () => {
                             const id = Number(memberInput);

@@ -107,6 +107,7 @@ model MessageMention {
   messageId Int
   userId    Int
   createdAt DateTime @default(now())
+  readAt    DateTime?
 
   chat    Chat    @relation(fields: [chatId], references: [id])
   message Message @relation(fields: [messageId], references: [id])
@@ -114,6 +115,7 @@ model MessageMention {
 
   @@index([chatId, userId])
   @@index([messageId])
+  @@index([userId, readAt])
 }
 
 model ChatRead {

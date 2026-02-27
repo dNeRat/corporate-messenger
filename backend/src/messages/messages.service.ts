@@ -21,7 +21,7 @@ export class MessagesService {
   }
 
   async sendMessage(userId: number, chatId: number, dto: CreateMessageDto) {
-    return this.prisma.$transaction(async (tx) => {
+    const { msg, mentionUserIds } = await this.prisma.$transaction(async (tx) => {
       await this.ensureMember(userId, chatId);
 
       const chat = await tx.chat.findUnique({
@@ -116,8 +116,44 @@ export class MessagesService {
       }
 
       this.chatGateway.emitNewMessage(chatId, msg);
-      return msg;
+      return { msg, mentionUserIds: uniqueMentionIds };
     });
+
+    if (mentionUserIds.length > 0) {
+      const mentions = await this.prisma.messageMention.findMany({
+        where: { messageId: msg.id, userId: { in: mentionUserIds } },
+        select: {
+          id: true,
+          createdAt: true,
+          readAt: true,
+          messageId: true,
+          chatId: true,
+          userId: true,
+          message: {
+            select: {
+              id: true,
+              text: true,
+              createdAt: true,
+              deletedAt: true,
+              author: {
+                select: {
+                  id: true,
+                  email: true,
+                  profile: { select: { firstName: true, lastName: true } },
+                },
+              },
+              chat: { select: { id: true, title: true, isGroup: true } },
+            },
+          },
+        },
+      });
+
+      for (const m of mentions) {
+        this.chatGateway.emitMention(m.userId, m);
+      }
+    }
+
+    return msg;
   }
 
   async listMessages(userId: number, chatId: number, cursor?: number, take = 30) {
@@ -252,6 +288,7 @@ export class MessagesService {
       select: {
         id: true,
         createdAt: true,
+        readAt: true,
         messageId: true,
         chatId: true,
         message: {
@@ -275,5 +312,28 @@ export class MessagesService {
 
     const nextCursor = items.length === take ? items[items.length - 1].id : null;
     return { items, nextCursor };
+  }
+
+  async getUnreadMentionsCount(userId: number) {
+    return this.prisma.messageMention.count({
+      where: { userId, readAt: null },
+    });
+  }
+
+  async markMentionRead(userId: number, mentionId: number) {
+    const mention = await this.prisma.messageMention.findUnique({
+      where: { id: mentionId },
+      select: { id: true, userId: true, readAt: true },
+    });
+    if (!mention || mention.userId !== userId) {
+      throw new NotFoundException('Mention not found');
+    }
+    if (mention.readAt) return mention;
+
+    return this.prisma.messageMention.update({
+      where: { id: mentionId },
+      data: { readAt: new Date() },
+      select: { id: true, readAt: true },
+    });
   }
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, ParseIntPipe, Patch, Query, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { MessagesService } from './messages.service';
 
@@ -18,5 +18,15 @@ export class MentionsController {
       cursor ? Number(cursor) : undefined,
       take ? Number(take) : 30,
     );
+  }
+
+  @Get('unread-count')
+  unreadCount(@Req() req: any) {
+    return this.messagesService.getUnreadMentionsCount(req.user.sub).then((count) => ({ count }));
+  }
+
+  @Patch(':id/read')
+  markRead(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.messagesService.markMentionRead(req.user.sub, id);
   }
 }

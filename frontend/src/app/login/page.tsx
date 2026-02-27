@@ -22,26 +22,26 @@ export default function LoginPage() {
 
 
   return (
-    <div className="flex h-screen items-center justify-center">
-      <form onSubmit={handleLogin} className="flex flex-col gap-4 w-80">
+    <div className="flex h-screen items-center justify-center bg-zinc-950 text-zinc-100">
+      <form onSubmit={handleLogin} className="flex flex-col gap-4 w-80 bg-zinc-900 border border-zinc-800 rounded-lg p-6">
         <h1 className="text-2xl font-bold">Login</h1>
 
         <input
-          className="border p-2 rounded"
+          className="border border-zinc-700 bg-zinc-950 p-2 rounded text-zinc-100 placeholder:text-zinc-500"
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
 
         <input
-          className="border p-2 rounded"
+          className="border border-zinc-700 bg-zinc-950 p-2 rounded text-zinc-100 placeholder:text-zinc-500"
           type="password"
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
 
-        <button className="bg-black text-white p-2 rounded">
+        <button className="bg-emerald-500 text-zinc-950 p-2 rounded">
           Login
         </button>
       </form>

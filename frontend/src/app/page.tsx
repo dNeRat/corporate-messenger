@@ -7,7 +7,7 @@ import { ChatList } from "@/components/ChatList";
 import { ChatWindow } from "@/components/ChatWindow";
 import { getSocket } from "@/lib/socket";
 import { createChat, getChats } from "@/lib/chats";
-import { getMentions } from "@/lib/messages";
+import { getMentions, getMentionsUnreadCount, markMentionRead } from "@/lib/messages";
 import { logout } from "@/lib/auth";
 import type { Chat } from "@/lib/types";
 
@@ -35,6 +35,8 @@ export default function HomePage() {
   const [mentions, setMentions] = useState<any[]>([]);
   const [mentionsCursor, setMentionsCursor] = useState<number | null>(null);
   const [loadingMentions, setLoadingMentions] = useState(false);
+  const [mentionsUnreadCount, setMentionsUnreadCount] = useState(0);
+  const [scrollToMessageId, setScrollToMessageId] = useState<number | null>(null);
 
   const firstUnreadId = pendingFirstUnreadId;
 
@@ -48,6 +50,7 @@ export default function HomePage() {
 
     setPendingFirstUnreadId(firstId); // Сохранили до сброса
     setSelectedChatId(chatId);
+    setScrollToMessageId(null);
 
     setUnread((prev) => {
       const next = { ...prev };
@@ -71,6 +74,8 @@ export default function HomePage() {
       const res = await getMentions(undefined, 30);
       setMentions(res.items);
       setMentionsCursor(res.nextCursor);
+      const unread = await getMentionsUnreadCount();
+      setMentionsUnreadCount(unread.count);
     } finally {
       setLoadingMentions(false);
     }
@@ -130,6 +135,8 @@ export default function HomePage() {
         setMe(res.data);
 
         await refreshChats();
+        const unread = await getMentionsUnreadCount();
+        setMentionsUnreadCount(unread.count);
       } catch {
         router.replace("/login");
       }
@@ -178,21 +185,33 @@ export default function HomePage() {
       });
     };
 
+    const onMention = (payload: any) => {
+      setMentions((prev) => {
+        if (prev.some((m) => m.id === payload.id)) return prev;
+        return [payload, ...prev];
+      });
+      setMentionsUnreadCount((c) => c + 1);
+    };
+
     socket.on("new_message", onNew);
-    return () => socket.off("new_message", onNew);
+    socket.on("mention_created", onMention);
+    return () => {
+      socket.off("new_message", onNew);
+      socket.off("mention_created", onMention);
+    };
   }, []);
 
   if (!me) return null;
 
   return (
-    <div className="h-screen overflow-hidden grid grid-cols-[320px_1fr]">
-      <aside className="h-full overflow-y-auto border-r">
-        <div className="p-3 border-b flex items-center justify-between">
-          <div className="text-sm text-gray-700 truncate">
+    <div className="h-screen overflow-hidden grid grid-cols-[320px_1fr] bg-zinc-950 text-zinc-100">
+      <aside className="h-full overflow-y-auto border-r border-zinc-800 bg-zinc-950">
+        <div className="p-3 border-b border-zinc-800 flex items-center justify-between">
+          <div className="text-sm text-zinc-200 truncate">
             {me?.profile?.firstName || me?.email || "User"}
           </div>
           <button
-            className="text-sm underline disabled:opacity-60"
+            className="text-sm underline text-zinc-400 hover:text-zinc-200 disabled:opacity-60"
             disabled={loggingOut}
             onClick={async () => {
               if (loggingOut) return;
@@ -212,11 +231,11 @@ export default function HomePage() {
           </button>
         </div>
 
-        <div className="p-2 border-b flex gap-2">
+        <div className="p-2 border-b border-zinc-800 flex gap-2">
           <button
             className={[
               "flex-1 text-sm rounded px-2 py-1",
-              view === "chats" ? "bg-black text-white" : "bg-gray-100",
+              view === "chats" ? "bg-emerald-500 text-zinc-950" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
             ].join(" ")}
             onClick={() => setView("chats")}
           >
@@ -225,23 +244,23 @@ export default function HomePage() {
           <button
             className={[
               "flex-1 text-sm rounded px-2 py-1",
-              view === "mentions" ? "bg-black text-white" : "bg-gray-100",
+              view === "mentions" ? "bg-emerald-500 text-zinc-950" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
             ].join(" ")}
             onClick={() => {
               setView("mentions");
               if (mentions.length === 0) refreshMentions();
             }}
           >
-            Упоминания
+            Упоминания{mentionsUnreadCount > 0 ? ` (${mentionsUnreadCount})` : ""}
           </button>
         </div>
 
         {view === "chats" && (
-          <form onSubmit={handleCreateChat} className="p-3 border-b space-y-2">
+          <form onSubmit={handleCreateChat} className="p-3 border-b border-zinc-800 space-y-2">
           <div className="font-semibold">Новый чат</div>
 
           <input
-            className="w-full border rounded p-2 text-sm"
+            className="w-full border border-zinc-700 bg-zinc-900 rounded p-2 text-sm text-zinc-100 placeholder:text-zinc-500"
             placeholder="User IDs (например: 2 или 2,5,7)"
             value={memberIdsInput}
             onChange={(e) => setMemberIdsInput(e.target.value)}
@@ -258,17 +277,17 @@ export default function HomePage() {
 
           {isGroup && (
             <input
-              className="w-full border rounded p-2 text-sm"
+              className="w-full border border-zinc-700 bg-zinc-900 rounded p-2 text-sm text-zinc-100 placeholder:text-zinc-500"
               placeholder="Название группы (опционально)"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
           )}
 
-          {createError && <div className="text-sm text-red-600">{createError}</div>}
+          {createError && <div className="text-sm text-rose-400">{createError}</div>}
 
           <button
-            className="w-full bg-black text-white rounded px-3 py-2 text-sm disabled:opacity-60"
+            className="w-full bg-emerald-500 text-zinc-950 rounded px-3 py-2 text-sm disabled:opacity-60"
             disabled={creating}
           >
             {creating ? "Создаём..." : "Создать чат"}
@@ -278,7 +297,7 @@ export default function HomePage() {
 
         {view === "chats" && (
           loadingChats ? (
-            <div className="p-4">Loading chats...</div>
+            <div className="p-4 text-zinc-400">Loading chats...</div>
           ) : (
             <ChatList
               chats={chats}
@@ -291,9 +310,9 @@ export default function HomePage() {
 
         {view === "mentions" && (
           <div className="p-3 space-y-2">
-            {loadingMentions && <div className="text-sm text-gray-500">Загрузка...</div>}
+            {loadingMentions && <div className="text-sm text-zinc-400">Загрузка...</div>}
             {!loadingMentions && mentions.length === 0 && (
-              <div className="text-sm text-gray-500">Нет упоминаний</div>
+              <div className="text-sm text-zinc-400">Нет упоминаний</div>
             )}
             {mentions.map((m: any) => {
               const msg = m.message;
@@ -306,16 +325,29 @@ export default function HomePage() {
               return (
                 <button
                   key={m.id}
-                  className="w-full text-left border rounded p-2 hover:bg-gray-50"
-                  onClick={() => {
-                    setPendingFirstUnreadId(msg?.id ?? null);
+                  className={[
+                    "w-full text-left border border-zinc-800 rounded p-2 hover:bg-zinc-900",
+                    m.readAt ? "" : "bg-amber-900/30",
+                  ].join(" ")}
+                  onClick={async () => {
+                    setPendingFirstUnreadId(null);
+                    setScrollToMessageId(msg?.id ?? null);
                     setSelectedChatId(chat?.id ?? null);
-                    setView("chats");
+                    if (!m.readAt) {
+                      try {
+                        await markMentionRead(m.id);
+                        setMentions((prev) =>
+                          prev.map((x) => (x.id === m.id ? { ...x, readAt: new Date().toISOString() } : x)),
+                        );
+                        setMentionsUnreadCount((c) => Math.max(0, c - 1));
+                      } catch {
+                      }
+                    }
                   }}
                 >
-                  <div className="text-xs text-gray-500">{chatTitle}</div>
+                  <div className="text-xs text-zinc-500">{chatTitle}</div>
                   <div className="text-sm font-medium truncate">{author}</div>
-                  <div className="text-sm text-gray-700 truncate">
+                  <div className="text-sm text-zinc-300 truncate">
                     {msg?.deletedAt ? "Сообщение удалено" : msg?.text}
                   </div>
                 </button>
@@ -324,7 +356,7 @@ export default function HomePage() {
 
             {mentionsCursor && (
               <button
-                className="text-sm underline text-gray-600"
+                className="text-sm underline text-zinc-400"
                 onClick={async () => {
                   const res = await getMentions(mentionsCursor, 30);
                   setMentions((prev) => [...prev, ...res.items]);
@@ -338,17 +370,19 @@ export default function HomePage() {
         )}
       </aside>
 
-      <main className="h-full min-h-0 overflow-hidden">
+      <main className="h-full min-h-0 overflow-hidden bg-zinc-950">
         {selectedChatId ? (
           <ChatWindow
             chatId={selectedChatId}
             chat={chats.find((c) => c.id === selectedChatId) ?? null}
             me={me}
             firstUnreadId={firstUnreadId}
+            scrollToMessageId={scrollToMessageId}
             onConsumedFirstUnread={() => setPendingFirstUnreadId(null)}
+            onConsumedScrollToMessage={() => setScrollToMessageId(null)}
           />
         ) : (
-          <div className="p-6 text-gray-600">Выбери чат слева</div>
+          <div className="p-6 text-zinc-500">Выбери чат слева</div>
         )}
       </main>
     </div>

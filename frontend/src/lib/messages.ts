@@ -31,3 +31,13 @@ export async function getMentions(cursor?: number, take = 30) {
   const res = await api.get(`/mentions?` + params.toString());
   return res.data as { items: any[]; nextCursor: number | null };
 }
+
+export async function getMentionsUnreadCount() {
+  const res = await api.get(`/mentions/unread-count`);
+  return res.data as { count: number };
+}
+
+export async function markMentionRead(mentionId: number) {
+  const res = await api.patch(`/mentions/${mentionId}/read`);
+  return res.data;
+}
