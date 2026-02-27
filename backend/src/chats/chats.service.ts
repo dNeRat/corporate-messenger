@@ -1,10 +1,34 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateChatDto } from './dto/create-chat.dto';
+import { UpdateChatDto } from './dto/update-chat.dto';
+import { AddMembersDto } from './dto/add-members.dto';
+import { SetMemberRoleDto } from './dto/set-member-role.dto';
 
 @Injectable()
 export class ChatsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private async getMembership(userId: number, chatId: number) {
+    return this.prisma.chatMember.findUnique({
+      where: { chatId_userId: { chatId, userId } },
+      select: { userId: true, role: true },
+    });
+  }
+
+  private async ensureMember(userId: number, chatId: number) {
+    const membership = await this.getMembership(userId, chatId);
+    if (!membership) throw new ForbiddenException('You are not a member of this chat');
+    return membership;
+  }
+
+  private async ensureRole(userId: number, chatId: number, roles: string[]) {
+    const membership = await this.ensureMember(userId, chatId);
+    if (!roles.includes(membership.role)) {
+      throw new ForbiddenException('You do not have permission');
+    }
+    return membership;
+  }
 
   async createChat(currentUserId: number, dto: CreateChatDto) {
     // Личный чат: ровно 1 собеседник + текущий = 2 участника
@@ -148,5 +172,95 @@ export class ChatsService {
     if (!isMember) throw new ForbiddenException('You are not a member of this chat');
 
     return chat;
+  }
+
+  async updateChat(currentUserId: number, chatId: number, dto: UpdateChatDto) {
+    await this.ensureRole(currentUserId, chatId, ['OWNER', 'ADMIN']);
+
+    const chat = await this.prisma.chat.findUnique({
+      where: { id: chatId },
+      select: { id: true, isGroup: true },
+    });
+    if (!chat) throw new NotFoundException('Chat not found');
+    if (!chat.isGroup) throw new ForbiddenException('Only group chats can be updated');
+
+    return this.prisma.chat.update({
+      where: { id: chatId },
+      data: { title: dto.title },
+      select: { id: true, title: true, isGroup: true, updatedAt: true },
+    });
+  }
+
+  async addMembers(currentUserId: number, chatId: number, dto: AddMembersDto) {
+    await this.ensureRole(currentUserId, chatId, ['OWNER', 'ADMIN']);
+
+    const uniqueUserIds = Array.from(new Set(dto.memberIds));
+    const existingUsers = await this.prisma.user.findMany({
+      where: { id: { in: uniqueUserIds } },
+      select: { id: true },
+    });
+
+    if (existingUsers.length !== uniqueUserIds.length) {
+      const existingIds = new Set(existingUsers.map(u => u.id));
+      const missing = uniqueUserIds.filter(id => !existingIds.has(id));
+      throw new ForbiddenException(`Users not found: ${missing.join(', ')}`);
+    }
+
+    const existingMembers = await this.prisma.chatMember.findMany({
+      where: { chatId, userId: { in: uniqueUserIds } },
+      select: { userId: true },
+    });
+    const existingSet = new Set(existingMembers.map(m => m.userId));
+    const toAdd = uniqueUserIds.filter(id => !existingSet.has(id));
+
+    if (toAdd.length === 0) return { added: 0 };
+
+    await this.prisma.chatMember.createMany({
+      data: toAdd.map((userId) => ({ chatId, userId, role: 'MEMBER' })),
+    });
+
+    return { added: toAdd.length };
+  }
+
+  async removeMember(currentUserId: number, chatId: number, memberId: number) {
+    const current = await this.ensureRole(currentUserId, chatId, ['OWNER', 'ADMIN']);
+
+    const target = await this.getMembership(memberId, chatId);
+    if (!target) throw new NotFoundException('Member not found');
+
+    if (target.role === 'OWNER' && current.role !== 'OWNER') {
+      throw new ForbiddenException('Only owner can remove owner');
+    }
+
+    if (target.role === 'OWNER') {
+      throw new ForbiddenException('Owner cannot be removed');
+    }
+
+    await this.prisma.chatMember.delete({
+      where: { chatId_userId: { chatId, userId: memberId } },
+    });
+
+    return { removed: true };
+  }
+
+  async setMemberRole(
+    currentUserId: number,
+    chatId: number,
+    memberId: number,
+    dto: SetMemberRoleDto,
+  ) {
+    await this.ensureRole(currentUserId, chatId, ['OWNER']);
+
+    const target = await this.getMembership(memberId, chatId);
+    if (!target) throw new NotFoundException('Member not found');
+    if (target.role === 'OWNER') {
+      throw new ForbiddenException('Owner role cannot be changed');
+    }
+
+    return this.prisma.chatMember.update({
+      where: { chatId_userId: { chatId, userId: memberId } },
+      data: { role: dto.role },
+      select: { userId: true, role: true },
+    });
   }
 }

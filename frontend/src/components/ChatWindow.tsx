@@ -5,6 +5,13 @@ import { getMessages, sendMessage } from "@/lib/messages";
 import { getSocket } from "@/lib/socket";
 import { api } from "@/lib/axios";
 import type { Chat } from "@/lib/types";
+import {
+  addChatMembers,
+  getChatById,
+  removeChatMember,
+  setChatMemberRole,
+  updateChatTitle,
+} from "@/lib/chats";
 
 export function ChatWindow({
   chatId,
@@ -29,6 +36,16 @@ export function ChatWindow({
   const typingTimerRef = useRef<any>(null);
 
   const [readMap, setReadMap] = useState<Record<number, string>>({});
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [details, setDetails] = useState<
+    (Chat & { members?: any[] }) | null
+  >(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [memberInput, setMemberInput] = useState("");
+  const [savingTitle, setSavingTitle] = useState(false);
+  const [mutatingMember, setMutatingMember] = useState(false);
 
   const myId = Number(me?.sub ?? me?.id);
 
@@ -210,10 +227,43 @@ export function ChatWindow({
     return name || chat.companion?.email || `Chat #${chatId}`;
   })();
 
+  const myMembership = details?.members?.find(
+    (m: any) => Number(m.userId) === Number(myId),
+  );
+  const myRole = String(myMembership?.role || "MEMBER");
+  const canManageMembers = myRole === "OWNER" || myRole === "ADMIN";
+  const canSetRoles = myRole === "OWNER";
+
+  async function loadDetails() {
+    setDetailsLoading(true);
+    setDetailsError(null);
+    try {
+      const data = await getChatById(chatId);
+      setDetails(data as any);
+      setEditTitle(data.title ?? "");
+    } catch (e: any) {
+      setDetailsError(e?.response?.data?.message ?? "Не удалось загрузить данные чата");
+    } finally {
+      setDetailsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (detailsOpen) {
+      loadDetails();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailsOpen, chatId]);
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="p-3 border-b shrink-0 flex items-center justify-between gap-3">
-        <div className="font-semibold truncate">{headerTitle}</div>
+        <button
+          className="font-semibold truncate text-left hover:underline"
+          onClick={() => setDetailsOpen(true)}
+        >
+          {headerTitle}
+        </button>
         <div className="text-xs text-gray-500 shrink-0">#{chatId}</div>
       </div>
 
@@ -297,6 +347,206 @@ export function ChatWindow({
         />
         <button className="bg-black text-white rounded px-4">Send</button>
       </form>
+
+      {detailsOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-lg shadow-lg overflow-hidden">
+            <div className="p-4 border-b flex items-center justify-between">
+              <div className="font-semibold">
+                {chat?.isGroup ? "Настройки чата" : "Профиль пользователя"}
+              </div>
+              <button
+                className="text-sm underline"
+                onClick={() => setDetailsOpen(false)}
+              >
+                Закрыть
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+              {detailsLoading && <div>Загрузка...</div>}
+              {detailsError && <div className="text-sm text-red-600">{detailsError}</div>}
+
+              {!detailsLoading && details && !chat?.isGroup && (
+                (() => {
+                  const other = details.members?.find(
+                    (m: any) => Number(m.userId) !== Number(myId),
+                  );
+                  const p = other?.user?.profile || {};
+                  const name = [p?.firstName, p?.lastName].filter(Boolean).join(" ");
+                  return (
+                    <div className="space-y-2">
+                      <div className="text-lg font-semibold">
+                        {name || other?.user?.email || `User #${other?.userId}`}
+                      </div>
+                      {other?.user?.email && (
+                        <div className="text-sm text-gray-600">{other.user.email}</div>
+                      )}
+                      {p?.position && <div className="text-sm">Должность: {p.position}</div>}
+                      {p?.department && <div className="text-sm">Отдел: {p.department}</div>}
+                    </div>
+                  );
+                })()
+              )}
+
+              {!detailsLoading && details && chat?.isGroup && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="text-sm text-gray-600">Название</div>
+                    <div className="flex gap-2">
+                      <input
+                        className="border rounded p-2 flex-1"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        disabled={!canManageMembers}
+                      />
+                      <button
+                        className="bg-black text-white rounded px-3 text-sm disabled:opacity-60"
+                        disabled={!canManageMembers || savingTitle}
+                        onClick={async () => {
+                          if (savingTitle) return;
+                          setSavingTitle(true);
+                          try {
+                            await updateChatTitle(chatId, editTitle.trim() || undefined);
+                            await loadDetails();
+                          } catch (e: any) {
+                            setDetailsError(
+                              e?.response?.data?.message ?? "Не удалось обновить чат",
+                            );
+                          } finally {
+                            setSavingTitle(false);
+                          }
+                        }}
+                      >
+                        {savingTitle ? "Сохраняем..." : "Сохранить"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm text-gray-600">Участники</div>
+                    <div className="space-y-2">
+                      {details.members?.map((m: any) => {
+                        const p = m.user?.profile || {};
+                        const name = [p?.firstName, p?.lastName].filter(Boolean).join(" ");
+                        const label = name || m.user?.email || `User #${m.userId}`;
+                        const isOwner = String(m.role) === "OWNER";
+                        const canRemove =
+                          canManageMembers &&
+                          !isOwner &&
+                          Number(m.userId) !== Number(myId);
+
+                        return (
+                          <div key={m.userId} className="flex items-center gap-2">
+                            <div className="flex-1 truncate">
+                              <div className="text-sm font-medium">{label}</div>
+                              {m.user?.email && (
+                                <div className="text-xs text-gray-600">
+                                  {m.user.email}
+                                </div>
+                              )}
+                            </div>
+
+                            {canSetRoles && !isOwner && (
+                              <select
+                                className="border rounded px-2 py-1 text-sm"
+                                value={String(m.role)}
+                                onChange={async (e) => {
+                                  const role = e.target.value as "ADMIN" | "MEMBER";
+                                  try {
+                                    await setChatMemberRole(chatId, m.userId, role);
+                                    await loadDetails();
+                                  } catch (err: any) {
+                                    setDetailsError(
+                                      err?.response?.data?.message ??
+                                        "Не удалось изменить роль",
+                                    );
+                                  }
+                                }}
+                              >
+                                <option value="ADMIN">ADMIN</option>
+                                <option value="MEMBER">MEMBER</option>
+                              </select>
+                            )}
+
+                            {!canSetRoles && (
+                              <div className="text-xs text-gray-500">{m.role}</div>
+                            )}
+
+                            {canRemove && (
+                              <button
+                                className="text-xs underline text-red-600 disabled:opacity-60"
+                                disabled={mutatingMember}
+                                onClick={async () => {
+                                  if (mutatingMember) return;
+                                  setMutatingMember(true);
+                                  try {
+                                    await removeChatMember(chatId, m.userId);
+                                    await loadDetails();
+                                  } catch (err: any) {
+                                    setDetailsError(
+                                      err?.response?.data?.message ??
+                                        "Не удалось удалить участника",
+                                    );
+                                  } finally {
+                                    setMutatingMember(false);
+                                  }
+                                }}
+                              >
+                                Удалить
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {canManageMembers && (
+                    <div className="space-y-2">
+                      <div className="text-sm text-gray-600">Добавить участника</div>
+                      <div className="flex gap-2">
+                        <input
+                          className="border rounded p-2 flex-1"
+                          placeholder="User ID"
+                          value={memberInput}
+                          onChange={(e) => setMemberInput(e.target.value)}
+                        />
+                        <button
+                          className="bg-black text-white rounded px-3 text-sm disabled:opacity-60"
+                          disabled={mutatingMember}
+                          onClick={async () => {
+                            const id = Number(memberInput);
+                            if (!id) {
+                              setDetailsError("Введите корректный userId");
+                              return;
+                            }
+                            setMutatingMember(true);
+                            try {
+                              await addChatMembers(chatId, [id]);
+                              setMemberInput("");
+                              await loadDetails();
+                            } catch (err: any) {
+                              setDetailsError(
+                                err?.response?.data?.message ??
+                                  "Не удалось добавить участника",
+                              );
+                            } finally {
+                              setMutatingMember(false);
+                            }
+                          }}
+                        >
+                          Добавить
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
