@@ -242,4 +242,38 @@ export class MessagesService {
     this.chatGateway.emitMessageDeleted(chatId, updated);
     return updated;
   }
+
+  async listMentions(userId: number, cursor?: number, take = 30) {
+    const items = await this.prisma.messageMention.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        createdAt: true,
+        messageId: true,
+        chatId: true,
+        message: {
+          select: {
+            id: true,
+            text: true,
+            createdAt: true,
+            deletedAt: true,
+            author: {
+              select: {
+                id: true,
+                email: true,
+                profile: { select: { firstName: true, lastName: true } },
+              },
+            },
+            chat: { select: { id: true, title: true, isGroup: true } },
+          },
+        },
+      },
+    });
+
+    const nextCursor = items.length === take ? items[items.length - 1].id : null;
+    return { items, nextCursor };
+  }
 }

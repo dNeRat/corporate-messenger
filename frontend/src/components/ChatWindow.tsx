@@ -53,9 +53,14 @@ export function ChatWindow({
   const [memberInput, setMemberInput] = useState("");
   const [savingTitle, setSavingTitle] = useState(false);
   const [mutatingMember, setMutatingMember] = useState(false);
+  const [members, setMembers] = useState<any[]>([]);
   const [pins, setPins] = useState<any[]>([]);
   const [pinsLoading, setPinsLoading] = useState(false);
   const [pinsOpen, setPinsOpen] = useState(true);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionStart, setMentionStart] = useState<number | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
 
   const myId = Number(me?.sub ?? me?.id);
 
@@ -81,6 +86,7 @@ export function ChatWindow({
     setEditingId(null);
     setEditText("");
     setPins([]);
+    setMembers([]);
 
     (async () => {
       const page = await getMessages(chatId, undefined, 30);
@@ -120,10 +126,23 @@ export function ChatWindow({
       if (chat?.isGroup) {
         setPinsLoading(true);
         try {
-          setPins(await getChatPins(chatId));
+          const nextPins = await getChatPins(chatId);
+          setPins(nextPins);
+          if (nextPins.length === 0) setPinsOpen(false);
         } catch {
         } finally {
           setPinsLoading(false);
+        }
+      }
+
+      const baseMembers = chat?.members ?? [];
+      if (baseMembers.length > 0) {
+        setMembers(baseMembers);
+      } else {
+        try {
+          const info = await getChatById(chatId);
+          setMembers(info.members ?? []);
+        } catch {
         }
       }
     })();
@@ -279,22 +298,99 @@ export function ChatWindow({
 
   const pinnedIds = new Set(pins.map((p) => Number(p.messageId)));
 
-  function renderMessageText(textValue: string) {
-    const mention = `@${myId}`;
-    if (!textValue || !mention) return textValue;
+  function getMemberLabelById(userId: number) {
+    const m = members.find((x) => Number(x.userId ?? x.id) === Number(userId));
+    const p = m?.user?.profile || m?.profile || {};
+    const name = [p?.firstName, p?.lastName].filter(Boolean).join(" ");
+    return name || m?.user?.email || m?.email || `User ${userId}`;
+  }
 
-    const parts = textValue.split(mention);
-    if (parts.length === 1) return textValue;
-    return parts.flatMap((part, idx) =>
-      idx < parts.length - 1
-        ? [
-            part,
-            <span key={`m-${idx}`} className="bg-yellow-200 text-black px-1 rounded">
-              {mention}
-            </span>,
-          ]
-        : [part],
-    );
+  function renderMessageText(textValue: string) {
+    if (!textValue) return textValue;
+
+    const re = /@(\d+)/g;
+    const nodes: Array<string | JSX.Element> = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = re.exec(textValue)) !== null) {
+      const start = match.index;
+      const end = start + match[0].length;
+      const id = Number(match[1]);
+
+      nodes.push(textValue.slice(lastIndex, start));
+      const label = `@${getMemberLabelById(id)}`;
+      const isMe = Number(id) === Number(myId);
+      nodes.push(
+        <span
+          key={`${start}-${end}`}
+          className={isMe ? "bg-yellow-200 text-black px-1 rounded" : "text-blue-700"}
+        >
+          {label}
+        </span>,
+      );
+      lastIndex = end;
+    }
+
+    nodes.push(textValue.slice(lastIndex));
+    return nodes.length === 1 ? textValue : nodes;
+  }
+
+  const mentionCandidates = members.filter((m) => {
+    const id = Number(m.userId ?? m.id);
+    if (!mentionQuery) return true;
+    const p = m.user?.profile || m.profile || {};
+    const name = [p?.firstName, p?.lastName].filter(Boolean).join(" ").toLowerCase();
+    const email = String(m.user?.email ?? m.email ?? "").toLowerCase();
+    const q = mentionQuery.toLowerCase();
+    return name.includes(q) || email.includes(q);
+  });
+
+  function onChangeTextValue(value: string, cursorPos: number | null) {
+    const cursor = cursorPos ?? value.length;
+    const before = value.slice(0, cursor);
+    const at = before.lastIndexOf("@");
+
+    if (
+      at >= 0 &&
+      (at === 0 || /\s/.test(before[at - 1])) &&
+      !/\s/.test(before.slice(at + 1))
+    ) {
+      const query = before.slice(at + 1);
+      setMentionOpen(true);
+      setMentionQuery(query);
+      setMentionStart(at);
+      setMentionIndex(0);
+    } else {
+      setMentionOpen(false);
+      setMentionQuery("");
+      setMentionStart(null);
+      setMentionIndex(0);
+    }
+  }
+
+  function applyMention(userId: number) {
+    const input = inputRef.current;
+    if (!input || mentionStart === null) return;
+
+    const value = editingId ? editText : text;
+    const cursor = input.selectionStart ?? value.length;
+    const before = value.slice(0, mentionStart);
+    const after = value.slice(cursor);
+    const next = `${before}@${userId} ${after}`;
+
+    if (editingId) setEditText(next);
+    else setText(next);
+
+    setMentionOpen(false);
+    setMentionQuery("");
+    setMentionStart(null);
+
+    requestAnimationFrame(() => {
+      const pos = (before + `@${userId} `).length;
+      input.focus();
+      input.setSelectionRange(pos, pos);
+    });
   }
 
   const myMembership = details?.members?.find(
@@ -337,7 +433,7 @@ export function ChatWindow({
         <div className="text-xs text-gray-500 shrink-0">#{chatId}</div>
       </div>
 
-      {chat?.isGroup && (
+      {chat?.isGroup && (pinsOpen || pins.length > 0 || pinsLoading) && (
         <div className="px-3 py-2 border-b bg-white">
           <div className="flex items-center justify-between mb-1">
             <div className="text-xs text-gray-500">
@@ -361,12 +457,21 @@ export function ChatWindow({
                 const author =
                   m?.author?.profile?.firstName || m?.author?.email || `User ${m?.author?.id}`;
                 return (
-                  <div key={p.id} className="text-xs border rounded px-2 py-1">
+                  <button
+                    key={p.id}
+                    className="text-xs border rounded px-2 py-1 text-left w-full hover:bg-gray-50"
+                    onClick={() => {
+                      const el = document.getElementById(`msg-${p.messageId}`);
+                      if (el) {
+                        el.scrollIntoView({ behavior: "smooth", block: "center" });
+                      }
+                    }}
+                  >
                     <div className="text-gray-600">{author}</div>
                     <div className="truncate">
                       {m?.deletedAt ? "Сообщение удалено" : m?.text}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -538,25 +643,78 @@ export function ChatWindow({
             </div>
           )}
 
-          <input
-            ref={inputRef}
-            className="border rounded p-2 flex-1"
-            placeholder="Написать сообщение..."
-            value={editingId ? editText : text}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (editingId) setEditText(v);
-              else setText(v);
+          <div className="relative">
+            <input
+              ref={inputRef}
+              className="border rounded p-2 flex-1 w-full"
+              placeholder="Написать сообщение..."
+              value={editingId ? editText : text}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (editingId) setEditText(v);
+                else setText(v);
 
-              const socket = getSocket();
-              socket.emit("typing", { chatId });
+                onChangeTextValue(v, e.target.selectionStart);
 
-              if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-              typingTimerRef.current = setTimeout(() => {
-                socket.emit("stop_typing", { chatId });
-              }, 800);
-            }}
-          />
+                const socket = getSocket();
+                socket.emit("typing", { chatId });
+
+                if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+                typingTimerRef.current = setTimeout(() => {
+                  socket.emit("stop_typing", { chatId });
+                }, 800);
+              }}
+              onBlur={() => {
+                setTimeout(() => setMentionOpen(false), 100);
+              }}
+              onFocus={() => {
+                const input = inputRef.current;
+                if (input) onChangeTextValue(input.value, input.selectionStart);
+              }}
+              onKeyDown={(e) => {
+                if (!mentionOpen || mentionCandidates.length === 0) return;
+
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setMentionIndex((i) => (i + 1) % mentionCandidates.length);
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setMentionIndex((i) =>
+                    (i - 1 + mentionCandidates.length) % mentionCandidates.length,
+                  );
+                } else if (e.key === "Enter" || e.key === "Tab") {
+                  e.preventDefault();
+                  const m = mentionCandidates[mentionIndex];
+                  if (m) applyMention(Number(m.userId ?? m.id));
+                } else if (e.key === "Escape") {
+                  setMentionOpen(false);
+                }
+              }}
+            />
+
+            {chat?.isGroup && mentionOpen && mentionCandidates.length > 0 && (
+              <div className="absolute bottom-full mb-2 left-0 right-0 max-h-40 overflow-auto border rounded bg-white shadow">
+                {mentionCandidates.map((m, idx) => {
+                  const id = Number(m.userId ?? m.id);
+                  const label = getMemberLabelById(id);
+                  return (
+                    <button
+                      type="button"
+                      key={id}
+                      className={[
+                        "w-full text-left px-2 py-1 text-sm",
+                        idx === mentionIndex ? "bg-gray-100" : "hover:bg-gray-100",
+                      ].join(" ")}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => applyMention(id)}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
         <button className="bg-black text-white rounded px-4">
           {editingId ? "Сохранить" : "Send"}

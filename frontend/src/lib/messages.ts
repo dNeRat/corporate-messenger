@@ -23,3 +23,11 @@ export async function deleteMessage(chatId: number, messageId: number) {
   const res = await api.delete(`/chats/${chatId}/messages/${messageId}`);
   return res.data;
 }
+
+export async function getMentions(cursor?: number, take = 30) {
+  const params = new URLSearchParams();
+  params.set("take", String(take));
+  if (cursor) params.set("cursor", String(cursor));
+  const res = await api.get(`/mentions?` + params.toString());
+  return res.data as { items: any[]; nextCursor: number | null };
+}

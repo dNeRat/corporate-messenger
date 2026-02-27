@@ -7,6 +7,7 @@ import { ChatList } from "@/components/ChatList";
 import { ChatWindow } from "@/components/ChatWindow";
 import { getSocket } from "@/lib/socket";
 import { createChat, getChats } from "@/lib/chats";
+import { getMentions } from "@/lib/messages";
 import { logout } from "@/lib/auth";
 import type { Chat } from "@/lib/types";
 
@@ -30,6 +31,10 @@ export default function HomePage() {
   const [isGroup, setIsGroup] = useState(false);
   const [title, setTitle] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
+  const [view, setView] = useState<"chats" | "mentions">("chats");
+  const [mentions, setMentions] = useState<any[]>([]);
+  const [mentionsCursor, setMentionsCursor] = useState<number | null>(null);
+  const [loadingMentions, setLoadingMentions] = useState(false);
 
   const firstUnreadId = pendingFirstUnreadId;
 
@@ -57,6 +62,17 @@ export default function HomePage() {
       setChats(await getChats());
     } finally {
       setLoadingChats(false);
+    }
+  }
+
+  async function refreshMentions() {
+    setLoadingMentions(true);
+    try {
+      const res = await getMentions(undefined, 30);
+      setMentions(res.items);
+      setMentionsCursor(res.nextCursor);
+    } finally {
+      setLoadingMentions(false);
     }
   }
 
@@ -196,7 +212,32 @@ export default function HomePage() {
           </button>
         </div>
 
-        <form onSubmit={handleCreateChat} className="p-3 border-b space-y-2">
+        <div className="p-2 border-b flex gap-2">
+          <button
+            className={[
+              "flex-1 text-sm rounded px-2 py-1",
+              view === "chats" ? "bg-black text-white" : "bg-gray-100",
+            ].join(" ")}
+            onClick={() => setView("chats")}
+          >
+            Чаты
+          </button>
+          <button
+            className={[
+              "flex-1 text-sm rounded px-2 py-1",
+              view === "mentions" ? "bg-black text-white" : "bg-gray-100",
+            ].join(" ")}
+            onClick={() => {
+              setView("mentions");
+              if (mentions.length === 0) refreshMentions();
+            }}
+          >
+            Упоминания
+          </button>
+        </div>
+
+        {view === "chats" && (
+          <form onSubmit={handleCreateChat} className="p-3 border-b space-y-2">
           <div className="font-semibold">Новый чат</div>
 
           <input
@@ -233,16 +274,67 @@ export default function HomePage() {
             {creating ? "Создаём..." : "Создать чат"}
           </button>
         </form>
+        )}
 
-        {loadingChats ? (
-          <div className="p-4">Loading chats...</div>
-        ) : (
-          <ChatList
-            chats={chats}
-            selectedChatId={selectedChatId}
-            onSelect={selectChat}
-            unread={unread}
-          />
+        {view === "chats" && (
+          loadingChats ? (
+            <div className="p-4">Loading chats...</div>
+          ) : (
+            <ChatList
+              chats={chats}
+              selectedChatId={selectedChatId}
+              onSelect={selectChat}
+              unread={unread}
+            />
+          )
+        )}
+
+        {view === "mentions" && (
+          <div className="p-3 space-y-2">
+            {loadingMentions && <div className="text-sm text-gray-500">Загрузка...</div>}
+            {!loadingMentions && mentions.length === 0 && (
+              <div className="text-sm text-gray-500">Нет упоминаний</div>
+            )}
+            {mentions.map((m: any) => {
+              const msg = m.message;
+              const chat = msg?.chat;
+              const author =
+                msg?.author?.profile?.firstName || msg?.author?.email || "Unknown";
+              const chatTitle = chat?.isGroup
+                ? chat?.title || `Chat #${chat?.id}`
+                : `Chat #${chat?.id}`;
+              return (
+                <button
+                  key={m.id}
+                  className="w-full text-left border rounded p-2 hover:bg-gray-50"
+                  onClick={() => {
+                    setPendingFirstUnreadId(msg?.id ?? null);
+                    setSelectedChatId(chat?.id ?? null);
+                    setView("chats");
+                  }}
+                >
+                  <div className="text-xs text-gray-500">{chatTitle}</div>
+                  <div className="text-sm font-medium truncate">{author}</div>
+                  <div className="text-sm text-gray-700 truncate">
+                    {msg?.deletedAt ? "Сообщение удалено" : msg?.text}
+                  </div>
+                </button>
+              );
+            })}
+
+            {mentionsCursor && (
+              <button
+                className="text-sm underline text-gray-600"
+                onClick={async () => {
+                  const res = await getMentions(mentionsCursor, 30);
+                  setMentions((prev) => [...prev, ...res.items]);
+                  setMentionsCursor(res.nextCursor);
+                }}
+              >
+                Загрузить ещё
+              </button>
+            )}
+          </div>
         )}
       </aside>
 
