@@ -54,7 +54,7 @@ async me(@Req() req: Request & { user: any }) {
 
   return this.prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, createdAt: true, profile: true },
+    select: { id: true, email: true, createdAt: true, presenceStatus: true, lastSeenAt: true, profile: true },
   });
 }
 

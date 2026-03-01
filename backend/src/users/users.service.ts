@@ -24,6 +24,8 @@ export class UsersService {
         id: true,
         email: true,
         createdAt: true,
+        presenceStatus: true,
+        lastSeenAt: true,
         profile: {
           select: {
             firstName: true,

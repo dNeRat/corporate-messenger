@@ -50,6 +50,12 @@ export class ChatGateway
     socket.data.userId = payload.sub;
     socket.join(`user:${payload.sub}`);
 
+    await this.prisma.user.update({
+      where: { id: Number(payload.sub) },
+      data: { presenceStatus: 'ONLINE' },
+    });
+    this.emitPresenceUpdate(Number(payload.sub), 'ONLINE', null);
+
     console.log('WS connected user:', payload.sub);
   } catch (error: any) {
     console.log('WS auth failed:', error?.message || error);
@@ -57,7 +63,20 @@ export class ChatGateway
   }
 }
 
-  handleDisconnect(socket: Socket) {
+  async handleDisconnect(socket: Socket) {
+    const userId = Number(socket.data?.userId);
+    if (userId) {
+      const active = await this.server.in(`user:${userId}`).fetchSockets();
+      const hasOtherConnections = active.some((s) => s.id !== socket.id);
+      if (!hasOtherConnections) {
+        const now = new Date();
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { presenceStatus: 'OFFLINE', lastSeenAt: now },
+        });
+        this.emitPresenceUpdate(userId, 'OFFLINE', now);
+      }
+    }
     console.log('WS disconnected:', socket.id);
   }
 
@@ -158,5 +177,13 @@ async handleMarkRead(@MessageBody() data: { chatId: number }, @ConnectedSocket()
 
   emitMention(userId: number, payload: any) {
     this.server.to(`user:${userId}`).emit('mention_created', payload);
+  }
+
+  emitPresenceUpdate(userId: number, status: 'ONLINE' | 'OFFLINE', lastSeenAt: Date | null) {
+    this.server.emit('presence_update', {
+      userId,
+      status,
+      lastSeenAt,
+    });
   }
 }

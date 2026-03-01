@@ -282,12 +282,50 @@ export function ChatWindow({
       );
     };
 
+    const onPresence = (payload: any) => {
+      const userId = Number(payload?.userId);
+      if (!userId) return;
+
+      setMembers((prev) =>
+        prev.map((m: any) => {
+          if (Number(m.userId ?? m.user?.id) !== userId) return m;
+          return {
+            ...m,
+            user: {
+              ...m.user,
+              presenceStatus: payload.status,
+              lastSeenAt: payload.lastSeenAt ?? null,
+            },
+          };
+        }),
+      );
+
+      setDetails((prev: any) => {
+        if (!prev?.members) return prev;
+        return {
+          ...prev,
+          members: prev.members.map((m: any) => {
+            if (Number(m.userId ?? m.user?.id) !== userId) return m;
+            return {
+              ...m,
+              user: {
+                ...m.user,
+                presenceStatus: payload.status,
+                lastSeenAt: payload.lastSeenAt ?? null,
+              },
+            };
+          }),
+        };
+      });
+    };
+
     socket.on("new_message", onNew);
     socket.on("typing", onTyping);
     socket.on("stop_typing", onStopTyping);
     socket.on("read_receipt", onReadReceipt);
     socket.on("message_updated", onMessageUpdated);
     socket.on("message_deleted", onMessageDeleted);
+    socket.on("presence_update", onPresence);
 
     return () => {
       alive = false;
@@ -305,6 +343,7 @@ export function ChatWindow({
       socket.off("read_receipt", onReadReceipt);
       socket.off("message_updated", onMessageUpdated);
       socket.off("message_deleted", onMessageDeleted);
+      socket.off("presence_update", onPresence);
     };
   }, [chatId, myId]);
 
@@ -412,6 +451,13 @@ export function ChatWindow({
     return name || chat.companion?.email || `Chat #${chatId}`;
   })();
 
+  const directPresenceLabel =
+    chat?.isGroup || !chat?.companion
+      ? null
+      : chat.companion.presenceStatus === "ONLINE"
+        ? "В сети"
+        : "Не в сети";
+
   const pinnedIds = new Set(pins.map((p) => Number(p.messageId)));
 
   function getMemberLabelById(userId: number) {
@@ -419,6 +465,10 @@ export function ChatWindow({
     const p = m?.user?.profile || m?.profile || {};
     const name = [p?.firstName, p?.lastName].filter(Boolean).join(" ");
     return name || m?.user?.email || m?.email || `User ${userId}`;
+  }
+
+  function getPresenceLabel(user: any) {
+    return user?.presenceStatus === "ONLINE" ? "В сети" : "Не в сети";
   }
 
   function renderMessageText(textValue: string) {
@@ -541,10 +591,13 @@ export function ChatWindow({
     <div className="h-full flex flex-col overflow-hidden">
       <div className="p-3 border-b border-zinc-800 shrink-0 flex items-center justify-between gap-3">
         <button
-          className="font-semibold truncate text-left hover:underline text-zinc-100"
+          className="text-left hover:underline"
           onClick={() => setDetailsOpen(true)}
         >
-          {headerTitle}
+          <div className="font-semibold truncate text-zinc-100">{headerTitle}</div>
+          {directPresenceLabel && (
+            <div className="text-xs text-zinc-400">{directPresenceLabel}</div>
+          )}
         </button>
         <div className="text-xs text-zinc-500 shrink-0">#{chatId}</div>
       </div>
@@ -869,6 +922,15 @@ export function ChatWindow({
                       <div className="text-lg font-semibold">
                         {name || other?.user?.email || `User #${other?.userId}`}
                       </div>
+                      <div
+                        className={
+                          other?.user?.presenceStatus === "ONLINE"
+                            ? "text-sm text-emerald-300"
+                            : "text-sm text-zinc-400"
+                        }
+                      >
+                        {getPresenceLabel(other?.user)}
+                      </div>
                       {other?.user?.email && (
                         <div className="text-sm text-zinc-400">{other.user.email}</div>
                       )}
@@ -930,6 +992,15 @@ export function ChatWindow({
                           <div key={m.userId} className="flex items-center gap-2">
                             <div className="flex-1 truncate">
                               <div className="text-sm font-medium">{label}</div>
+                              <div
+                                className={
+                                  m.user?.presenceStatus === "ONLINE"
+                                    ? "text-xs text-emerald-300"
+                                    : "text-xs text-zinc-500"
+                                }
+                              >
+                                {getPresenceLabel(m.user)}
+                              </div>
                               {m.user?.email && (
                                 <div className="text-xs text-zinc-400">
                                   {m.user.email}

@@ -193,11 +193,48 @@ export default function HomePage() {
       setMentionsUnreadCount((c) => c + 1);
     };
 
+    const onPresence = (payload: any) => {
+      const userId = Number(payload?.userId);
+      if (!userId) return;
+
+      setChats((prev) =>
+        prev.map((chat) => {
+          const next: any = { ...chat };
+
+          if (next.companion && Number(next.companion.id) === userId) {
+            next.companion = {
+              ...next.companion,
+              presenceStatus: payload.status,
+              lastSeenAt: payload.lastSeenAt ?? null,
+            };
+          }
+
+          if (Array.isArray(next.members)) {
+            next.members = next.members.map((m: any) => {
+              if (Number(m.userId ?? m.user?.id) !== userId) return m;
+              return {
+                ...m,
+                user: {
+                  ...m.user,
+                  presenceStatus: payload.status,
+                  lastSeenAt: payload.lastSeenAt ?? null,
+                },
+              };
+            });
+          }
+
+          return next;
+        }),
+      );
+    };
+
     socket.on("new_message", onNew);
     socket.on("mention_created", onMention);
+    socket.on("presence_update", onPresence);
     return () => {
       socket.off("new_message", onNew);
       socket.off("mention_created", onMention);
+      socket.off("presence_update", onPresence);
     };
   }, []);
 

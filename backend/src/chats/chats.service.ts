@@ -117,6 +117,8 @@ export class ChatsService {
             select: {
               id: true,
               email: true,
+              presenceStatus: true,
+              lastSeenAt: true,
               profile: {
                 select: { firstName: true, lastName: true, avatarUrl: true },
               },
@@ -168,6 +170,8 @@ export class ChatsService {
               select: {
                 id: true,
                 email: true,
+                presenceStatus: true,
+                lastSeenAt: true,
                 profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
               },
             },

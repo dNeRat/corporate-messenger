@@ -12,12 +12,19 @@ enum Role {
   ADMIN
 }
 
+enum PresenceStatus {
+  ONLINE
+  OFFLINE
+}
+
 model User {
   id           Int      @id @default(autoincrement())
   email        String   @unique
   passwordHash String
   role         Role     @default(USER)
   createdAt    DateTime @default(now())
+  presenceStatus PresenceStatus @default(OFFLINE)
+  lastSeenAt     DateTime?
 
   memberships     ChatMember[]
   messages        Message[]
