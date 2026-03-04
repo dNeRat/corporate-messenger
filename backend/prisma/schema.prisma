@@ -51,6 +51,8 @@ model Chat {
   id        Int      @id @default(autoincrement())
   title     String?
   isGroup   Boolean  @default(false)
+  directUserAId Int?
+  directUserBId Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
@@ -59,6 +61,8 @@ model Chat {
   chatReads       ChatRead[]
   messagePins     MessagePin[]
   messageMentions MessageMention[]
+
+  @@unique([directUserAId, directUserBId])
 }
 
 model ChatMember {

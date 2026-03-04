@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/axios";
 import { ChatList } from "@/components/ChatList";
 import { ChatWindow } from "@/components/ChatWindow";
 import { getSocket } from "@/lib/socket";
-import { createChat, getChats } from "@/lib/chats";
+import { createDirectChat, createGroupChat, getChats } from "@/lib/chats";
 import { getMentions, getMentionsUnreadCount, markMentionRead } from "@/lib/messages";
 import { logout } from "@/lib/auth";
-import type { Chat } from "@/lib/types";
+import { searchUsers } from "@/lib/users";
+import type { Chat, User } from "@/lib/types";
 
 export default function HomePage() {
   const router = useRouter();
@@ -18,38 +19,43 @@ export default function HomePage() {
 
   const [me, setMe] = useState<any>(null);
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
+  const selectedChatIdRef = useRef<number | null>(null);
 
-  const [unread, setUnread] = useState<
-    Record<number, { count: number; firstId: number }>
-  >({});
-
+  const [unread, setUnread] = useState<Record<number, { count: number; firstId: number }>>({});
   const [chats, setChats] = useState<Chat[]>([]);
   const [loadingChats, setLoadingChats] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [memberIdsInput, setMemberIdsInput] = useState("");
-  const [isGroup, setIsGroup] = useState(false);
-  const [title, setTitle] = useState("");
+
   const [loggingOut, setLoggingOut] = useState(false);
   const [view, setView] = useState<"chats" | "mentions">("chats");
+
   const [mentions, setMentions] = useState<any[]>([]);
   const [mentionsCursor, setMentionsCursor] = useState<number | null>(null);
   const [loadingMentions, setLoadingMentions] = useState(false);
   const [mentionsUnreadCount, setMentionsUnreadCount] = useState(0);
   const [scrollToMessageId, setScrollToMessageId] = useState<number | null>(null);
+
   const [myPresence, setMyPresence] = useState<"ONLINE" | "DO_NOT_DISTURB">("ONLINE");
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<"direct" | "group">("direct");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createTitle, setCreateTitle] = useState("");
+  const [userQuery, setUserQuery] = useState("");
+  const [userResults, setUserResults] = useState<User[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [selectedDirectUserId, setSelectedDirectUserId] = useState<number | null>(null);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
 
   const firstUnreadId = pendingFirstUnreadId;
 
-  const selectedChatIdRef = useRef<number | null>(null);
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
   }, [selectedChatId]);
 
   function selectChat(chatId: number) {
     const firstId = unread[chatId]?.firstId ?? null;
-
-    setPendingFirstUnreadId(firstId); // Сохранили до сброса
+    setPendingFirstUnreadId(firstId);
     setSelectedChatId(chatId);
     setScrollToMessageId(null);
 
@@ -75,60 +81,113 @@ export default function HomePage() {
       const res = await getMentions(undefined, 30);
       setMentions(res.items);
       setMentionsCursor(res.nextCursor);
-      const unread = await getMentionsUnreadCount();
-      setMentionsUnreadCount(unread.count);
+      const unreadRes = await getMentionsUnreadCount();
+      setMentionsUnreadCount(unreadRes.count);
     } finally {
       setLoadingMentions(false);
     }
   }
 
-  async function handleCreateChat(e: React.FormEvent) {
-    e.preventDefault();
-    if (creating) return;
+  function userLabel(user: User | null | undefined) {
+    if (!user) return "Unknown";
+    const name = [user.profile?.firstName, user.profile?.lastName]
+      .filter(Boolean)
+      .join(" ");
+    return name || user.email || `User #${user.id}`;
+  }
 
-    const memberIds = memberIdsInput
-      .split(/[,\s]+/)
-      .map((v) => Number(v))
-      .filter((v) => Number.isInteger(v) && v > 0);
+  function resetCreateState(nextMode: "direct" | "group" = "direct") {
+    setCreateMode(nextMode);
+    setCreateError(null);
+    setCreateTitle("");
+    setUserQuery("");
+    setUserResults([]);
+    setSelectedDirectUserId(null);
+    setSelectedGroupIds([]);
+  }
 
-    if (memberIds.length === 0) {
-      setCreateError("Введите хотя бы один userId");
-      return;
+  async function loadUsers(query?: string) {
+    setLoadingUsers(true);
+    try {
+      setUserResults(await searchUsers(query, 30));
+    } finally {
+      setLoadingUsers(false);
     }
+  }
 
-    if (!isGroup && memberIds.length !== 1) {
-      setCreateError("Для личного чата нужен ровно один userId");
+  async function openCreateModal(mode: "direct" | "group" = "direct") {
+    resetCreateState(mode);
+    setCreateOpen(true);
+    await loadUsers();
+  }
+
+  function closeCreateModal() {
+    setCreateOpen(false);
+    resetCreateState();
+  }
+
+  async function handleCreateDirect() {
+    if (creating) return;
+    if (!selectedDirectUserId) {
+      setCreateError("Выберите пользователя");
       return;
     }
 
     setCreateError(null);
     setCreating(true);
-
     try {
-      const res = await createChat({
-        isGroup,
-        memberIds,
-        title: isGroup ? title.trim() || undefined : undefined,
-      });
-
+      const res = await createDirectChat(selectedDirectUserId);
       await refreshChats();
-
-      const newChatId = res.chat?.id ?? res.chatId ?? null;
-      if (newChatId) {
-        setSelectedChatId(newChatId);
-      }
-
-      setMemberIdsInput("");
-      setTitle("");
-      setIsGroup(false);
+      if (res.chatId) setSelectedChatId(res.chatId);
+      closeCreateModal();
     } catch (err: any) {
-      setCreateError(err?.response?.data?.message ?? "Не удалось создать чат");
+      setCreateError(err?.response?.data?.message ?? "Не удалось создать личный чат");
     } finally {
       setCreating(false);
     }
   }
 
-  // один эффект: me + chats
+  async function handleCreateGroup() {
+    if (creating) return;
+    if (selectedGroupIds.length === 0) {
+      setCreateError("Выберите хотя бы одного участника");
+      return;
+    }
+
+    setCreateError(null);
+    setCreating(true);
+    try {
+      const res = await createGroupChat({
+        title: createTitle.trim() || undefined,
+        memberIds: selectedGroupIds,
+      });
+      await refreshChats();
+      const newChatId = res.chat?.id ?? res.chatId ?? null;
+      if (newChatId) setSelectedChatId(newChatId);
+      closeCreateModal();
+    } catch (err: any) {
+      setCreateError(err?.response?.data?.message ?? "Не удалось создать групповой чат");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function toggleGroupUser(userId: number) {
+    setSelectedGroupIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId],
+    );
+  }
+
+  const selectedGroupUsers = useMemo(
+    () =>
+      selectedGroupIds.map((id) => {
+        const found = userResults.find((u) => Number(u.id) === id);
+        if (found) return found;
+        return { id, email: `User #${id}` } as User;
+      }),
+    [userResults, selectedGroupIds],
+  );
+
   useEffect(() => {
     (async () => {
       try {
@@ -139,15 +198,23 @@ export default function HomePage() {
         );
 
         await refreshChats();
-        const unread = await getMentionsUnreadCount();
-        setMentionsUnreadCount(unread.count);
+        const unreadRes = await getMentionsUnreadCount();
+        setMentionsUnreadCount(unreadRes.count);
       } catch {
         router.replace("/login");
       }
     })();
   }, [router]);
 
-  // realtime: unread + preview + поднять чат наверх
+  useEffect(() => {
+    if (!createOpen) return;
+    const timer = setTimeout(() => {
+      loadUsers(userQuery).catch(() => {
+      });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [createOpen, userQuery]);
+
   useEffect(() => {
     const socket = getSocket();
 
@@ -310,7 +377,9 @@ export default function HomePage() {
           <button
             className={[
               "flex-1 text-sm rounded px-2 py-1",
-              view === "chats" ? "bg-emerald-500 text-zinc-950" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
+              view === "chats"
+                ? "bg-emerald-500 text-zinc-950"
+                : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
             ].join(" ")}
             onClick={() => setView("chats")}
           >
@@ -319,7 +388,9 @@ export default function HomePage() {
           <button
             className={[
               "flex-1 text-sm rounded px-2 py-1",
-              view === "mentions" ? "bg-emerald-500 text-zinc-950" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
+              view === "mentions"
+                ? "bg-emerald-500 text-zinc-950"
+                : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
             ].join(" ")}
             onClick={() => {
               setView("mentions");
@@ -331,43 +402,17 @@ export default function HomePage() {
         </div>
 
         {view === "chats" && (
-          <form onSubmit={handleCreateChat} className="p-3 border-b border-zinc-800 space-y-2">
-          <div className="font-semibold">Новый чат</div>
-
-          <input
-            className="w-full border border-zinc-700 bg-zinc-900 rounded p-2 text-sm text-zinc-100 placeholder:text-zinc-500"
-            placeholder="User IDs (например: 2 или 2,5,7)"
-            value={memberIdsInput}
-            onChange={(e) => setMemberIdsInput(e.target.value)}
-          />
-
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={isGroup}
-              onChange={(e) => setIsGroup(e.target.checked)}
-            />
-            Групповой чат
-          </label>
-
-          {isGroup && (
-            <input
-              className="w-full border border-zinc-700 bg-zinc-900 rounded p-2 text-sm text-zinc-100 placeholder:text-zinc-500"
-              placeholder="Название группы (опционально)"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          )}
-
-          {createError && <div className="text-sm text-rose-400">{createError}</div>}
-
-          <button
-            className="w-full bg-emerald-500 text-zinc-950 rounded px-3 py-2 text-sm disabled:opacity-60"
-            disabled={creating}
-          >
-            {creating ? "Создаём..." : "Создать чат"}
-          </button>
-        </form>
+          <div className="p-3 border-b border-zinc-800">
+            <button
+              className="w-full bg-emerald-500 text-zinc-950 rounded px-3 py-2 text-sm font-medium"
+              onClick={() => {
+                openCreateModal("direct").catch(() => {
+                });
+              }}
+            >
+              Новый чат
+            </button>
+          </div>
         )}
 
         {view === "chats" && (
@@ -412,7 +457,9 @@ export default function HomePage() {
                       try {
                         await markMentionRead(m.id);
                         setMentions((prev) =>
-                          prev.map((x) => (x.id === m.id ? { ...x, readAt: new Date().toISOString() } : x)),
+                          prev.map((x) =>
+                            x.id === m.id ? { ...x, readAt: new Date().toISOString() } : x,
+                          ),
                         );
                         setMentionsUnreadCount((c) => Math.max(0, c - 1));
                       } catch {
@@ -438,7 +485,7 @@ export default function HomePage() {
                   setMentionsCursor(res.nextCursor);
                 }}
               >
-                Загрузить ещё
+                Загрузить еще
               </button>
             )}
           </div>
@@ -460,6 +507,146 @@ export default function HomePage() {
           <div className="p-6 text-zinc-500">Выбери чат слева</div>
         )}
       </main>
+
+      {createOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl">
+            <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+              <div className="font-semibold">Новый чат</div>
+              <button
+                className="text-sm underline text-zinc-400 hover:text-zinc-200"
+                onClick={closeCreateModal}
+              >
+                Закрыть
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="flex gap-2">
+                <button
+                  className={[
+                    "flex-1 rounded px-2 py-1 text-sm",
+                    createMode === "direct"
+                      ? "bg-emerald-500 text-zinc-950"
+                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
+                  ].join(" ")}
+                  onClick={() => {
+                    setCreateMode("direct");
+                    setCreateError(null);
+                  }}
+                >
+                  Личный
+                </button>
+                <button
+                  className={[
+                    "flex-1 rounded px-2 py-1 text-sm",
+                    createMode === "group"
+                      ? "bg-emerald-500 text-zinc-950"
+                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
+                  ].join(" ")}
+                  onClick={() => {
+                    setCreateMode("group");
+                    setCreateError(null);
+                  }}
+                >
+                  Групповой
+                </button>
+              </div>
+
+              {createMode === "group" && (
+                <input
+                  className="w-full border border-zinc-700 bg-zinc-950 rounded p-2 text-sm text-zinc-100 placeholder:text-zinc-500"
+                  placeholder="Название группы (опционально)"
+                  value={createTitle}
+                  onChange={(e) => setCreateTitle(e.target.value)}
+                />
+              )}
+
+              <input
+                className="w-full border border-zinc-700 bg-zinc-950 rounded p-2 text-sm text-zinc-100 placeholder:text-zinc-500"
+                placeholder="Поиск по имени или email"
+                value={userQuery}
+                onChange={(e) => setUserQuery(e.target.value)}
+              />
+
+              {createMode === "group" && selectedGroupUsers.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {selectedGroupUsers.map((user) => (
+                    <button
+                      key={user.id}
+                      className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+                      onClick={() => toggleGroupUser(Number(user.id))}
+                    >
+                      {userLabel(user)} ×
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="max-h-64 overflow-auto border border-zinc-800 rounded">
+                {loadingUsers && (
+                  <div className="p-3 text-sm text-zinc-400">Загрузка...</div>
+                )}
+                {!loadingUsers && userResults.length === 0 && (
+                  <div className="p-3 text-sm text-zinc-400">Пользователи не найдены</div>
+                )}
+                {!loadingUsers && userResults.map((user) => {
+                  const isSelectedDirect = selectedDirectUserId === Number(user.id);
+                  const isSelectedGroup = selectedGroupIds.includes(Number(user.id));
+                  return (
+                    <button
+                      key={user.id}
+                      className={[
+                        "w-full text-left px-3 py-2 border-b border-zinc-800 last:border-b-0",
+                        createMode === "direct"
+                          ? isSelectedDirect
+                            ? "bg-emerald-900/30"
+                            : "hover:bg-zinc-800"
+                          : isSelectedGroup
+                            ? "bg-emerald-900/30"
+                            : "hover:bg-zinc-800",
+                      ].join(" ")}
+                      onClick={() => {
+                        if (createMode === "direct") {
+                          setSelectedDirectUserId(Number(user.id));
+                        } else {
+                          toggleGroupUser(Number(user.id));
+                        }
+                      }}
+                    >
+                      <div className="text-sm font-medium">{userLabel(user)}</div>
+                      <div className="text-xs text-zinc-400">{user.email}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {createError && <div className="text-sm text-rose-400">{createError}</div>}
+            </div>
+
+            <div className="p-4 border-t border-zinc-800 flex justify-end gap-2">
+              <button
+                className="px-3 py-2 rounded bg-zinc-800 text-zinc-200 hover:bg-zinc-700 text-sm"
+                onClick={closeCreateModal}
+                disabled={creating}
+              >
+                Отмена
+              </button>
+              <button
+                className="px-3 py-2 rounded bg-emerald-500 text-zinc-950 text-sm disabled:opacity-60"
+                onClick={createMode === "direct" ? handleCreateDirect : handleCreateGroup}
+                disabled={creating}
+              >
+                {creating
+                  ? "Создаем..."
+                  : createMode === "direct"
+                    ? "Начать чат"
+                    : "Создать группу"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

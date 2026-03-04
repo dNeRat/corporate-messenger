@@ -17,6 +17,43 @@ type CreateUserInput = {
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async search(currentUserId: number, q?: string, limit = 20) {
+    const normalizedLimit = Math.max(1, Math.min(50, Number(limit) || 20));
+    const term = (q ?? '').trim();
+
+    return this.prisma.user.findMany({
+      where: {
+        id: { not: Number(currentUserId) },
+        ...(term
+          ? {
+              OR: [
+                { email: { contains: term, mode: 'insensitive' } },
+                { profile: { firstName: { contains: term, mode: 'insensitive' } } },
+                { profile: { lastName: { contains: term, mode: 'insensitive' } } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { email: 'asc' },
+      take: normalizedLimit,
+      select: {
+        id: true,
+        email: true,
+        presenceStatus: true,
+        lastSeenAt: true,
+        profile: {
+          select: {
+            firstName: true,
+            lastName: true,
+            avatarUrl: true,
+            position: true,
+            department: true,
+          },
+        },
+      },
+    });
+  }
+
   async getAll() {
     return this.prisma.user.findMany({
       orderBy: { id: 'asc' },

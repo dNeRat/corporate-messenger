@@ -5,6 +5,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { UpdateChatDto } from './dto/update-chat.dto';
 import { AddMembersDto } from './dto/add-members.dto';
 import { SetMemberRoleDto } from './dto/set-member-role.dto';
+import { CreateDirectChatDto } from './dto/create-direct-chat.dto';
+import { CreateGroupChatDto } from './dto/create-group-chat.dto';
 
 @Controller('chats')
 @UseGuards(JwtAuthGuard)
@@ -14,6 +16,16 @@ export class ChatsController {
   @Post()
   create(@Req() req: any, @Body() dto: CreateChatDto) {
     return this.chatsService.createChat(req.user.sub, dto);
+  }
+
+  @Post('direct')
+  createDirect(@Req() req: any, @Body() dto: CreateDirectChatDto) {
+    return this.chatsService.createDirectChat(req.user.sub, dto.userId);
+  }
+
+  @Post('group')
+  createGroup(@Req() req: any, @Body() dto: CreateGroupChatDto) {
+    return this.chatsService.createGroupChat(req.user.sub, dto);
   }
 
   @Get()

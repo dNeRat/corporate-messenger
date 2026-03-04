@@ -1,9 +1,11 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { UpdateChatDto } from './dto/update-chat.dto';
 import { AddMembersDto } from './dto/add-members.dto';
 import { SetMemberRoleDto } from './dto/set-member-role.dto';
+import { CreateGroupChatDto } from './dto/create-group-chat.dto';
 
 @Injectable()
 export class ChatsService {
@@ -40,53 +42,118 @@ export class ChatsService {
     return chat;
   }
 
-  async createChat(currentUserId: number, dto: CreateChatDto) {
-    // Личный чат: ровно 1 собеседник + текущий = 2 участника
-    if (!dto.isGroup) {
-      if (dto.memberIds.length !== 1) {
-        throw new ForbiddenException('Direct chat must have exactly 1 memberId');
+  private async ensureUsersExist(userIds: number[]) {
+    const uniqueUserIds = Array.from(new Set(userIds));
+    const existingUsers = await this.prisma.user.findMany({
+      where: { id: { in: uniqueUserIds } },
+      select: { id: true },
+    });
+
+    if (existingUsers.length !== uniqueUserIds.length) {
+      const existingIds = new Set(existingUsers.map((u) => u.id));
+      const missing = uniqueUserIds.filter((id) => !existingIds.has(id));
+      throw new ForbiddenException(`Users not found: ${missing.join(', ')}`);
+    }
+  }
+
+  private isUniqueViolation(error: unknown) {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+    );
+  }
+
+  private sortDirectPair(userA: number, userB: number) {
+    return userA < userB ? [userA, userB] : [userB, userA];
+  }
+
+  async createDirectChat(currentUserId: number, otherUserId: number) {
+    if (!otherUserId || !Number.isInteger(otherUserId) || otherUserId < 1) {
+      throw new BadRequestException('Invalid userId');
+    }
+    if (Number(otherUserId) === Number(currentUserId)) {
+      throw new BadRequestException('Cannot create direct chat with yourself');
+    }
+
+    await this.ensureUsersExist([currentUserId, otherUserId]);
+
+    const [directUserAId, directUserBId] = this.sortDirectPair(
+      currentUserId,
+      otherUserId,
+    );
+
+    const existingByPair = await this.prisma.chat.findUnique({
+      where: { directUserAId_directUserBId: { directUserAId, directUserBId } },
+      select: { id: true },
+    });
+    if (existingByPair) return { chatId: existingByPair.id, reused: true };
+
+    const legacyDirect = await this.prisma.chat.findFirst({
+      where: {
+        isGroup: false,
+        AND: [
+          { members: { some: { userId: currentUserId } } },
+          { members: { some: { userId: otherUserId } } },
+          { members: { every: { userId: { in: [currentUserId, otherUserId] } } } },
+        ],
+      },
+      select: { id: true, directUserAId: true, directUserBId: true },
+    });
+
+    if (legacyDirect) {
+      if (!legacyDirect.directUserAId || !legacyDirect.directUserBId) {
+        try {
+          await this.prisma.chat.update({
+            where: { id: legacyDirect.id },
+            data: { directUserAId, directUserBId },
+          });
+        } catch (error) {
+          if (!this.isUniqueViolation(error)) throw error;
+        }
       }
 
-      const otherUserId = dto.memberIds[0];
+      const normalized = await this.prisma.chat.findUnique({
+        where: { directUserAId_directUserBId: { directUserAId, directUserBId } },
+        select: { id: true },
+      });
+      return { chatId: normalized?.id ?? legacyDirect.id, reused: true };
+    }
 
-      // Попробуем найти уже существующий direct-чат между этими двумя
-      const existing = await this.prisma.chat.findFirst({
-        where: {
+    try {
+      const chat = await this.prisma.chat.create({
+        data: {
           isGroup: false,
+          directUserAId,
+          directUserBId,
           members: {
-            some: { userId: currentUserId },
-          },
-          AND: {
-            members: {
-              some: { userId: otherUserId },
-            },
+            create: [directUserAId, directUserBId].map((userId) => ({
+              userId,
+              role: userId === currentUserId ? 'OWNER' : 'MEMBER',
+            })),
           },
         },
         select: { id: true },
       });
+      return { chatId: chat.id, reused: false };
+    } catch (error) {
+      if (!this.isUniqueViolation(error)) throw error;
 
-      if (existing) return { chatId: existing.id, reused: true };
+      const chat = await this.prisma.chat.findUnique({
+        where: { directUserAId_directUserBId: { directUserAId, directUserBId } },
+        select: { id: true },
+      });
+      if (!chat) throw error;
+      return { chatId: chat.id, reused: true };
     }
+  }
 
-    // Участники (добавляем себя всегда)
+  async createGroupChat(currentUserId: number, dto: CreateGroupChatDto) {
     const uniqueUserIds = Array.from(new Set([currentUserId, ...dto.memberIds]));
-
-    // Проверяем, что все userId существуют
-    const existingUsers = await this.prisma.user.findMany({
-    where: { id: { in: uniqueUserIds } },
-    select: { id: true },
-    });
-
-    if (existingUsers.length !== uniqueUserIds.length) {
-    const existingIds = new Set(existingUsers.map(u => u.id));
-    const missing = uniqueUserIds.filter(id => !existingIds.has(id));
-    throw new ForbiddenException(`Users not found: ${missing.join(', ')}`);
-    }
+    await this.ensureUsersExist(uniqueUserIds);
 
     const chat = await this.prisma.chat.create({
       data: {
         title: dto.title,
-        isGroup: dto.isGroup,
+        isGroup: true,
         members: {
           create: uniqueUserIds.map((userId) => ({
             userId,
@@ -98,6 +165,19 @@ export class ChatsService {
     });
 
     return { chat, reused: false };
+  }
+  async createChat(currentUserId: number, dto: CreateChatDto) {
+    if (dto.isGroup) {
+      return this.createGroupChat(currentUserId, {
+        title: dto.title,
+        memberIds: dto.memberIds,
+      });
+    }
+
+    if (dto.memberIds.length !== 1) {
+      throw new BadRequestException('Direct chat must have exactly 1 memberId');
+    }
+    return this.createDirectChat(currentUserId, dto.memberIds[0]);
   }
 
   async listMyChats(currentUserId: number) {
@@ -209,16 +289,7 @@ export class ChatsService {
     await this.ensureRole(currentUserId, chatId, ['OWNER', 'ADMIN']);
 
     const uniqueUserIds = Array.from(new Set(dto.memberIds));
-    const existingUsers = await this.prisma.user.findMany({
-      where: { id: { in: uniqueUserIds } },
-      select: { id: true },
-    });
-
-    if (existingUsers.length !== uniqueUserIds.length) {
-      const existingIds = new Set(existingUsers.map(u => u.id));
-      const missing = uniqueUserIds.filter(id => !existingIds.has(id));
-      throw new ForbiddenException(`Users not found: ${missing.join(', ')}`);
-    }
+    await this.ensureUsersExist(uniqueUserIds);
 
     const existingMembers = await this.prisma.chatMember.findMany({
       where: { chatId, userId: { in: uniqueUserIds } },

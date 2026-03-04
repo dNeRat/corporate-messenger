@@ -15,6 +15,19 @@ export async function createChat(payload: {
   return res.data as { chat?: Chat; chatId?: number; reused?: boolean };
 }
 
+export async function createDirectChat(userId: number) {
+  const res = await api.post("/chats/direct", { userId });
+  return res.data as { chatId: number; reused?: boolean };
+}
+
+export async function createGroupChat(payload: {
+  memberIds: number[];
+  title?: string;
+}) {
+  const res = await api.post("/chats/group", payload);
+  return res.data as { chat?: Chat; chatId?: number; reused?: boolean };
+}
+
 export async function getChatById(chatId: number) {
   const res = await api.get(`/chats/${chatId}`);
   return res.data as Chat & {
