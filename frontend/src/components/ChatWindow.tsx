@@ -451,14 +451,37 @@ export function ChatWindow({
     return name || chat.companion?.email || `Chat #${chatId}`;
   })();
 
+  function formatLastSeen(lastSeenAt?: string | Date | null) {
+    if (!lastSeenAt) return "Не в сети";
+
+    const seen = new Date(lastSeenAt);
+    if (Number.isNaN(seen.getTime())) return "Не в сети";
+
+    const now = new Date();
+    const isToday =
+      seen.getFullYear() === now.getFullYear() &&
+      seen.getMonth() === now.getMonth() &&
+      seen.getDate() === now.getDate();
+    const time = seen.toLocaleTimeString("ru-RU", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    if (isToday) return `Последний раз был(а) в ${time}`;
+
+    const withYear = seen.getFullYear() !== now.getFullYear();
+    const date = seen.toLocaleDateString("ru-RU", {
+      day: "numeric",
+      month: "long",
+      ...(withYear ? { year: "numeric" } : {}),
+    });
+    return `Последний раз был(а) в ${time} ${date}`;
+  }
+
   const directPresenceLabel =
     chat?.isGroup || !chat?.companion
       ? null
-      : chat.companion.presenceStatus === "ONLINE"
-        ? "В сети"
-        : chat.companion.presenceStatus === "DO_NOT_DISTURB"
-          ? "Не беспокоить"
-          : "Не в сети";
+      : getPresenceLabel(chat.companion, true);
 
   const pinnedIds = new Set(pins.map((p) => Number(p.messageId)));
 
@@ -469,9 +492,10 @@ export function ChatWindow({
     return name || m?.user?.email || m?.email || `User ${userId}`;
   }
 
-  function getPresenceLabel(user: any) {
+  function getPresenceLabel(user: any, showLastSeen = false) {
     if (user?.presenceStatus === "ONLINE") return "В сети";
     if (user?.presenceStatus === "DO_NOT_DISTURB") return "Не беспокоить";
+    if (showLastSeen) return formatLastSeen(user?.lastSeenAt);
     return "Не в сети";
   }
 
@@ -935,7 +959,7 @@ export function ChatWindow({
                               : "text-sm text-zinc-400"
                         }
                       >
-                        {getPresenceLabel(other?.user)}
+                        {getPresenceLabel(other?.user, true)}
                       </div>
                       {other?.user?.email && (
                         <div className="text-sm text-zinc-400">{other.user.email}</div>
@@ -1007,7 +1031,7 @@ export function ChatWindow({
                                       : "text-xs text-zinc-500"
                                 }
                               >
-                                {getPresenceLabel(m.user)}
+                                {getPresenceLabel(m.user, true)}
                               </div>
                               {m.user?.email && (
                                 <div className="text-xs text-zinc-400">
