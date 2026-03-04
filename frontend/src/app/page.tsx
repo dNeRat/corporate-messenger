@@ -37,6 +37,7 @@ export default function HomePage() {
   const [loadingMentions, setLoadingMentions] = useState(false);
   const [mentionsUnreadCount, setMentionsUnreadCount] = useState(0);
   const [scrollToMessageId, setScrollToMessageId] = useState<number | null>(null);
+  const [myPresence, setMyPresence] = useState<"ONLINE" | "DO_NOT_DISTURB">("ONLINE");
 
   const firstUnreadId = pendingFirstUnreadId;
 
@@ -133,6 +134,9 @@ export default function HomePage() {
       try {
         const res = await api.get("/auth/me");
         setMe(res.data);
+        setMyPresence(
+          res.data?.presenceStatus === "DO_NOT_DISTURB" ? "DO_NOT_DISTURB" : "ONLINE",
+        );
 
         await refreshChats();
         const unread = await getMentionsUnreadCount();
@@ -197,6 +201,20 @@ export default function HomePage() {
       const userId = Number(payload?.userId);
       if (!userId) return;
 
+      setMe((prev: any) => {
+        if (!prev) return prev;
+        const myId = Number(prev.id ?? prev.sub);
+        if (myId !== userId) return prev;
+        const nextStatus =
+          payload.status === "DO_NOT_DISTURB" ? "DO_NOT_DISTURB" : "ONLINE";
+        setMyPresence(nextStatus);
+        return {
+          ...prev,
+          presenceStatus: payload.status,
+          lastSeenAt: payload.lastSeenAt ?? null,
+        };
+      });
+
       setChats((prev) =>
         prev.map((chat) => {
           const next: any = { ...chat };
@@ -243,29 +261,49 @@ export default function HomePage() {
   return (
     <div className="h-screen overflow-hidden grid grid-cols-[320px_1fr] bg-zinc-950 text-zinc-100">
       <aside className="h-full overflow-y-auto border-r border-zinc-800 bg-zinc-950">
-        <div className="p-3 border-b border-zinc-800 flex items-center justify-between">
-          <div className="text-sm text-zinc-200 truncate">
-            {me?.profile?.firstName || me?.email || "User"}
+        <div className="p-3 border-b border-zinc-800 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm text-zinc-200 truncate">
+              {me?.profile?.firstName || me?.email || "User"}
+            </div>
+            <div className="text-xs text-zinc-500">
+              {myPresence === "DO_NOT_DISTURB" ? "Не беспокоить" : "В сети"}
+            </div>
           </div>
-          <button
-            className="text-sm underline text-zinc-400 hover:text-zinc-200 disabled:opacity-60"
-            disabled={loggingOut}
-            onClick={async () => {
-              if (loggingOut) return;
-              setLoggingOut(true);
-              try {
-                await logout();
-              } finally {
-                setMe(null);
-                setSelectedChatId(null);
-                setUnread({});
-                setChats([]);
-                router.replace("/login");
-              }
-            }}
-          >
-            {loggingOut ? "Выходим..." : "Выйти"}
-          </button>
+          <div className="flex items-center gap-2">
+            <select
+              className="text-xs border border-zinc-700 bg-zinc-900 rounded px-2 py-1"
+              value={myPresence}
+              onChange={(e) => {
+                const next =
+                  e.target.value === "DO_NOT_DISTURB" ? "DO_NOT_DISTURB" : "ONLINE";
+                setMyPresence(next);
+                getSocket().emit("set_presence", { status: next });
+              }}
+            >
+              <option value="ONLINE">В сети</option>
+              <option value="DO_NOT_DISTURB">Не беспокоить</option>
+            </select>
+            <button
+              className="text-sm underline text-zinc-400 hover:text-zinc-200 disabled:opacity-60"
+              disabled={loggingOut}
+              onClick={async () => {
+                if (loggingOut) return;
+                setLoggingOut(true);
+                try {
+                  await logout();
+                } finally {
+                  setMe(null);
+                  setSelectedChatId(null);
+                  setUnread({});
+                  setChats([]);
+                  router.replace("/login");
+                }
+              }}
+            >
+              {loggingOut ? "Выходим..." : "Выйти"}
+            </button>
+          </div>
         </div>
 
         <div className="p-2 border-b border-zinc-800 flex gap-2">

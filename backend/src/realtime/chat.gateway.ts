@@ -50,11 +50,18 @@ export class ChatGateway
     socket.data.userId = payload.sub;
     socket.join(`user:${payload.sub}`);
 
+    const current = await this.prisma.user.findUnique({
+      where: { id: Number(payload.sub) },
+      select: { presenceStatus: true },
+    });
+    const nextStatus =
+      current?.presenceStatus === 'DO_NOT_DISTURB' ? 'DO_NOT_DISTURB' : 'ONLINE';
+
     await this.prisma.user.update({
       where: { id: Number(payload.sub) },
-      data: { presenceStatus: 'ONLINE' },
+      data: { presenceStatus: nextStatus },
     });
-    this.emitPresenceUpdate(Number(payload.sub), 'ONLINE', null);
+    this.emitPresenceUpdate(Number(payload.sub), nextStatus, null);
 
     console.log('WS connected user:', payload.sub);
   } catch (error: any) {
@@ -163,6 +170,26 @@ async handleMarkRead(@MessageBody() data: { chatId: number }, @ConnectedSocket()
   });
 }
 
+  @SubscribeMessage('set_presence')
+  async handleSetPresence(
+    @MessageBody() data: { status: 'ONLINE' | 'DO_NOT_DISTURB' },
+    @ConnectedSocket() socket: Socket,
+  ) {
+    const userId = Number(socket.data?.userId);
+    if (!userId) return;
+
+    const status =
+      data?.status === 'DO_NOT_DISTURB' ? 'DO_NOT_DISTURB' : 'ONLINE';
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { presenceStatus: status },
+    });
+
+    this.emitPresenceUpdate(userId, status, null);
+    return { ok: true, status };
+  }
+
   emitNewMessage(chatId: number, payload: any) {
     this.server.to(`chat:${chatId}`).emit('new_message', payload);
   }
@@ -179,7 +206,11 @@ async handleMarkRead(@MessageBody() data: { chatId: number }, @ConnectedSocket()
     this.server.to(`user:${userId}`).emit('mention_created', payload);
   }
 
-  emitPresenceUpdate(userId: number, status: 'ONLINE' | 'OFFLINE', lastSeenAt: Date | null) {
+  emitPresenceUpdate(
+    userId: number,
+    status: 'ONLINE' | 'DO_NOT_DISTURB' | 'OFFLINE',
+    lastSeenAt: Date | null,
+  ) {
     this.server.emit('presence_update', {
       userId,
       status,

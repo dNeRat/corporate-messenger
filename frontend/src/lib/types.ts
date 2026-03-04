@@ -7,7 +7,7 @@ export type Profile = {
 export type User = {
   id: number;
   email: string;
-  presenceStatus?: "ONLINE" | "OFFLINE";
+  presenceStatus?: "ONLINE" | "DO_NOT_DISTURB" | "OFFLINE";
   lastSeenAt?: string | null;
   profile?: Profile | null;
 };

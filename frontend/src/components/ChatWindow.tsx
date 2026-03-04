@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { deleteMessage, editMessage, getMessages, sendMessage } from "@/lib/messages";
 import { getSocket } from "@/lib/socket";
 import { api } from "@/lib/axios";
@@ -456,7 +456,9 @@ export function ChatWindow({
       ? null
       : chat.companion.presenceStatus === "ONLINE"
         ? "В сети"
-        : "Не в сети";
+        : chat.companion.presenceStatus === "DO_NOT_DISTURB"
+          ? "Не беспокоить"
+          : "Не в сети";
 
   const pinnedIds = new Set(pins.map((p) => Number(p.messageId)));
 
@@ -468,14 +470,16 @@ export function ChatWindow({
   }
 
   function getPresenceLabel(user: any) {
-    return user?.presenceStatus === "ONLINE" ? "В сети" : "Не в сети";
+    if (user?.presenceStatus === "ONLINE") return "В сети";
+    if (user?.presenceStatus === "DO_NOT_DISTURB") return "Не беспокоить";
+    return "Не в сети";
   }
 
   function renderMessageText(textValue: string) {
     if (!textValue) return textValue;
 
     const re = /@(\d+)/g;
-    const nodes: Array<string | JSX.Element> = [];
+    const nodes: Array<string | ReactNode> = [];
     let lastIndex = 0;
     let match: RegExpExecArray | null;
 
@@ -926,7 +930,9 @@ export function ChatWindow({
                         className={
                           other?.user?.presenceStatus === "ONLINE"
                             ? "text-sm text-emerald-300"
-                            : "text-sm text-zinc-400"
+                            : other?.user?.presenceStatus === "DO_NOT_DISTURB"
+                              ? "text-sm text-amber-300"
+                              : "text-sm text-zinc-400"
                         }
                       >
                         {getPresenceLabel(other?.user)}
@@ -996,7 +1002,9 @@ export function ChatWindow({
                                 className={
                                   m.user?.presenceStatus === "ONLINE"
                                     ? "text-xs text-emerald-300"
-                                    : "text-xs text-zinc-500"
+                                    : m.user?.presenceStatus === "DO_NOT_DISTURB"
+                                      ? "text-xs text-amber-300"
+                                      : "text-xs text-zinc-500"
                                 }
                               >
                                 {getPresenceLabel(m.user)}

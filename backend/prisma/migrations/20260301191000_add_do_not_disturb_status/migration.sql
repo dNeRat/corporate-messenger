@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "PresenceStatus" ADD VALUE IF NOT EXISTS 'DO_NOT_DISTURB';
